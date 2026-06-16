@@ -1,0 +1,8271 @@
+"use strict";
+
+/* ---------- constants ---------- */
+
+const STATE_DB_NAME = "creamyRecallStateDB_v2";
+const STATE_DB_VERSION = 1;
+const STATE_STORE = "kv";
+const STATE_KEY = "app-state";
+
+const FILE_DB_NAME = "creamyRecallFilesDB_v2";
+const FILE_DB_VERSION = 1;
+const FILE_STORE = "files";
+
+const LEGACY_KEYS = [
+  "creamyRecallData_v10",
+  "creamyRecallData_v9",
+  "creamyRecallData_v8",
+  "creamyRecallData_v7",
+  "creamyRecallData_v6",
+  "creamyRecallData_v5",
+  "creamyRecallData_v4"
+];
+
+const CURVE_DAYS = [0, 1, 3, 7, 14, 30, 60, 90];
+
+const DEFAULT_DECKS = [
+  { name: "Uncategorized", color: "#eeeeee", protected: true },
+  { name: "內科", color: "#dcecff" },
+  { name: "外科", color: "#eadfff" },
+  { name: "其他", color: "#ececec" },
+  { name: "婦產科", color: "#ffe0eb" },
+  { name: "兒科", color: "#ffe6cf" },
+  { name: "衛生中心", color: "#dff5ff" },
+  { name: "物理治療", color: "#def4df" },
+  { name: "急診", color: "#ffe1dd" },
+  { name: "藥學", color: "#e7dcff" }
+];
+
+const THEMES = {
+  cream: { label: "奶油桃", icon: "🧈" },
+  lavender: { label: "霧紫", icon: "💜" },
+  mint: { label: "薄荷", icon: "🌿" },
+  sky: { label: "霧藍", icon: "☁️" },
+  night: { label: "夜間奶油", icon: "🌙" },
+  library: { label: "圖書館", icon: "📚" },
+  mono: { label: "專注灰階", icon: "◻️" }
+};
+
+/* ---------- globals ---------- */
+
+let stateDb = null;
+let fileDb = null;
+let appState = null;
+
+let currentView = "home";
+let currentCalendarDate = new Date();
+let selectedCalendarDate = formatDateLocal(new Date());
+let currentDeckWall = "";
+let importMode = "merge";
+
+let activeEditorId = "";
+let pendingTableTarget = "";
+let pendingStudySource = null;
+
+let modalExistingImages = [];
+let modalExistingFiles = [];
+let modalDraftImages = [];
+let modalDraftFiles = [];
+let modalPresetDeckId = "";
+
+let saveTimer = null;
+let dirty = false;
+
+let remindedMap = {};
+let objectUrlCache = new Map();
+
+let splitResizeActive = false;
+
+let studyInlineEditing = false;
+let studyEditingTarget = "answer";
+let studyInlineOriginalQuestionHtml = "";
+let studyInlineOriginalAnswerHtml = "";
+
+let studyEditDraft = {
+  questionHtml: "",
+  answerHtml: ""
+};
+
+let studyState = {
+  active: false,
+  sourceType: "",
+  sourceLabel: "",
+  notes: [],
+  index: 0,
+  total: 0,
+  answerVisible: false,
+  stats: {
+    remembered: 0,
+    okay: 0,
+    forgot: 0,
+    mastered: 0,
+    later: 0
+  },
+  preferences: {
+    order: "due-first",
+    viewMode: "flip",
+    filter: "all",
+    includeDone: "no"
+  }
+};
+
+const els = {};
+
+/* ---------- init ---------- */
+
+document.addEventListener("DOMContentLoaded", init);
+
+async function init() {
+  collectEls();
+
+  try {
+    stateDb = await openKeyValueDb(STATE_DB_NAME, STATE_DB_VERSION, STATE_STORE);
+    fileDb = await openKeyValueDb(FILE_DB_NAME, FILE_DB_VERSION, FILE_STORE);
+    await requestPersistentStorage();
+    appState = await loadAppState();
+  } catch (error) {
+    console.error(error);
+    appState = defaultState();
+    showToast("資料庫開啟失敗", "目前資料可能無法保存。", "error");
+  }
+
+  bindEvents();
+  applyTheme(appState.settings.theme || "cream");
+  switchView("home");
+  await renderAll();
+  setInterval(reminderLoop, 30000);
+  setSaveStatus("saved", "已載入");
+}
+
+function collectEls() {
+  Object.assign(els, {
+    navBtns: document.querySelectorAll(".nav-btn"),
+    pageTitle: document.getElementById("pageTitle"),
+    pageSubtitle: document.getElementById("pageSubtitle"),
+    todayDateText: document.getElementById("todayDateText"),
+    brandIcon: document.getElementById("brandIcon"),
+    addNoteBtn: document.getElementById("addNoteBtn"),
+    addNoteFromNotesBtn: document.getElementById("addNoteFromNotesBtn"),
+    studyTodayBtn: document.getElementById("studyTodayBtn"),
+    toastContainer: document.getElementById("toastContainer"),
+
+    saveDot: document.getElementById("saveDot"),
+    saveText: document.getElementById("saveText"),
+
+    homeView: document.getElementById("homeView"),
+    notesView: document.getElementById("notesView"),
+    calendarView: document.getElementById("calendarView"),
+    reviewView: document.getElementById("reviewView"),
+    settingsView: document.getElementById("settingsView"),
+
+    statDueToday: document.getElementById("statDueToday"),
+    statNewToday: document.getElementById("statNewToday"),
+    statDoneToday: document.getElementById("statDoneToday"),
+    statStreak: document.getElementById("statStreak"),
+    todayTasksList: document.getElementById("todayTasksList"),
+    subjectDeckGrid: document.getElementById("subjectDeckGrid"),
+    studyTodayInlineBtn: document.getElementById("studyTodayInlineBtn"),
+    addDeckBtn: document.getElementById("addDeckBtn"),
+
+    notesList: document.getElementById("notesList"),
+    notesSectionTitle: document.getElementById("notesSectionTitle"),
+    notesSectionHint: document.getElementById("notesSectionHint"),
+    subjectWallHeader: document.getElementById("subjectWallHeader"),
+
+    searchInput: document.getElementById("searchInput"),
+    filterDeck: document.getElementById("filterDeck"),
+    filterImportance: document.getElementById("filterImportance"),
+    filterDifficulty: document.getElementById("filterDifficulty"),
+    filterStudyState: document.getElementById("filterStudyState"),
+    filterStarred: document.getElementById("filterStarred"),
+
+    calendarTitle: document.getElementById("calendarTitle"),
+    calendarWeekdays: document.getElementById("calendarWeekdays"),
+    calendarGrid: document.getElementById("calendarGrid"),
+    prevMonthBtn: document.getElementById("prevMonthBtn"),
+    nextMonthBtn: document.getElementById("nextMonthBtn"),
+    todayMonthBtn: document.getElementById("todayMonthBtn"),
+    selectedDateLabel: document.getElementById("selectedDateLabel"),
+    selectedDateTasks: document.getElementById("selectedDateTasks"),
+    cakeEmoji: document.getElementById("cakeEmoji"),
+    cakeTitle: document.getElementById("cakeTitle"),
+    cakeSub: document.getElementById("cakeSub"),
+    cakeProgress: document.getElementById("cakeProgress"),
+    cakeMeta: document.getElementById("cakeMeta"),
+
+    reviewList: document.getElementById("reviewList"),
+    reviewToStudyBtn: document.getElementById("reviewToStudyBtn"),
+
+    defaultReminderInput: document.getElementById("defaultReminderInput"),
+    soundToggle: document.getElementById("soundToggle"),
+    soundVolumeInput: document.getElementById("soundVolumeInput"),
+    reduceMotionToggle: document.getElementById("reduceMotionToggle"),
+    enableNotifyBtn: document.getElementById("enableNotifyBtn"),
+    testSoundBtn: document.getElementById("testSoundBtn"),
+    themeButtons: document.querySelectorAll(".theme-option"),
+    cakeKindInput: document.getElementById("cakeKindInput"),
+    cakeGoalInput: document.getElementById("cakeGoalInput"),
+
+    exportBackupBtn: document.getElementById("exportBackupBtn"),
+    importMergeBtn: document.getElementById("importMergeBtn"),
+    importReplaceBtn: document.getElementById("importReplaceBtn"),
+    importBackupInput: document.getElementById("importBackupInput"),
+    resetAllBtn: document.getElementById("resetAllBtn"),
+
+    noteModal: document.getElementById("noteModal"),
+    noteForm: document.getElementById("noteForm"),
+    noteId: document.getElementById("noteId"),
+    modalTitle: document.getElementById("modalTitle"),
+    closeModalBtn: document.getElementById("closeModalBtn"),
+    cancelModalBtn: document.getElementById("cancelModalBtn"),
+    deleteNoteBtn: document.getElementById("deleteNoteBtn"),
+
+    deckInput: document.getElementById("deckInput"),
+    importanceInput: document.getElementById("importanceInput"),
+    difficultyInput: document.getElementById("difficultyInput"),
+    starredInput: document.getElementById("starredInput"),
+    scheduleModeInput: document.getElementById("scheduleModeInput"),
+    curveStageInput: document.getElementById("curveStageInput"),
+    nextReviewDateInput: document.getElementById("nextReviewDateInput"),
+    reminderTimeInput: document.getElementById("reminderTimeInput"),
+    notesInput: document.getElementById("notesInput"),
+
+    questionEditor: document.getElementById("questionEditor"),
+    answerEditor: document.getElementById("answerEditor"),
+    questionInlineImageInput: document.getElementById("questionInlineImageInput"),
+    answerInlineImageInput: document.getElementById("answerInlineImageInput"),
+
+    imageInput: document.getElementById("imageInput"),
+    fileInput: document.getElementById("fileInput"),
+    attachmentPreview: document.getElementById("attachmentPreview"),
+
+    deckModal: document.getElementById("deckModal"),
+    deckForm: document.getElementById("deckForm"),
+    deckModalTitle: document.getElementById("deckModalTitle"),
+    deckIdInput: document.getElementById("deckIdInput"),
+    deckNameInput: document.getElementById("deckNameInput"),
+    deckColorInput: document.getElementById("deckColorInput"),
+    closeDeckModalBtn: document.getElementById("closeDeckModalBtn"),
+    cancelDeckModalBtn: document.getElementById("cancelDeckModalBtn"),
+
+    customReminderModal: document.getElementById("customReminderModal"),
+    customReviewNoteId: document.getElementById("customReviewNoteId"),
+    customReviewDate: document.getElementById("customReviewDate"),
+    closeCustomReminderBtn: document.getElementById("closeCustomReminderBtn"),
+    cancelCustomReviewBtn: document.getElementById("cancelCustomReviewBtn"),
+    saveCustomReviewBtn: document.getElementById("saveCustomReviewBtn"),
+
+    studyPreferenceModal: document.getElementById("studyPreferenceModal"),
+    closeStudyPreferenceBtn: document.getElementById("closeStudyPreferenceBtn"),
+    cancelStudyPreferenceBtn: document.getElementById("cancelStudyPreferenceBtn"),
+    startStudyBtn: document.getElementById("startStudyBtn"),
+    studySourceLabel: document.getElementById("studySourceLabel"),
+    studyOrderInput: document.getElementById("studyOrderInput"),
+    studyViewModeInput: document.getElementById("studyViewModeInput"),
+    studyFilterInput: document.getElementById("studyFilterInput"),
+    studyIncludeDoneInput: document.getElementById("studyIncludeDoneInput"),
+
+    studyModeView: document.getElementById("studyModeView"),
+    studyModeTitle: document.getElementById("studyModeTitle"),
+    studyModeSubtitle: document.getElementById("studyModeSubtitle"),
+    studyEditBtn: document.getElementById("studyEditBtn"),
+    toggleStudyLayoutBtn: document.getElementById("toggleStudyLayoutBtn"),
+    exitStudyModeBtn: document.getElementById("exitStudyModeBtn"),
+
+    studyInlineEditBar: document.getElementById("studyInlineEditBar"),
+    studyEditQuestionTab: document.getElementById("studyEditQuestionTab"),
+    studyEditAnswerTab: document.getElementById("studyEditAnswerTab"),
+    studySaveInlineBtn: document.getElementById("studySaveInlineBtn"),
+    studyCancelInlineBtn: document.getElementById("studyCancelInlineBtn"),
+    studyInsertImageBtn: document.getElementById("studyInsertImageBtn"),
+    studyInlineImageInput: document.getElementById("studyInlineImageInput"),
+
+    studyProgressText: document.getElementById("studyProgressText"),
+    studyRemainingText: document.getElementById("studyRemainingText"),
+    studyProgressFill: document.getElementById("studyProgressFill"),
+
+    studyStage: document.getElementById("studyStage"),
+    studyDeckBadge: document.getElementById("studyDeckBadge"),
+    studyCurveBadge: document.getElementById("studyCurveBadge"),
+    studyStateBadge: document.getElementById("studyStateBadge"),
+
+    studyCardFlip: document.getElementById("studyCardFlip"),
+    studyCardInner: document.getElementById("studyCardInner"),
+    studyQuestion: document.getElementById("studyQuestion"),
+    studyAnswer: document.getElementById("studyAnswer"),
+
+    studyCardSplit: document.getElementById("studyCardSplit"),
+    studyQuestionSplit: document.getElementById("studyQuestionSplit"),
+    studyAnswerSplit: document.getElementById("studyAnswerSplit"),
+    studySplitResizer: document.getElementById("studySplitResizer"),
+    studySplitAnswerPanel: document.getElementById("studySplitAnswerPanel"),
+    studySplitAnswerCover: document.getElementById("studySplitAnswerCover"),
+    studySplitRevealBtn: document.getElementById("studySplitRevealBtn"),
+
+    studyForgotBtn: document.getElementById("studyForgotBtn"),
+    studyOkayBtn: document.getElementById("studyOkayBtn"),
+    studyRememberedBtn: document.getElementById("studyRememberedBtn"),
+    studyMasteredBtn: document.getElementById("studyMasteredBtn"),
+    studyLaterBtn: document.getElementById("studyLaterBtn"),
+    studyPrevBtn: document.getElementById("studyPrevBtn"),
+    studyFlipBtn: document.getElementById("studyFlipBtn"),
+    studyNextBtn: document.getElementById("studyNextBtn"),
+
+    studyCompleteState: document.getElementById("studyCompleteState"),
+    studySummaryStats: document.getElementById("studySummaryStats"),
+    studyCompleteCloseBtn: document.getElementById("studyCompleteCloseBtn"),
+
+    tableInsertModal: document.getElementById("tableInsertModal"),
+    tableRowsInput: document.getElementById("tableRowsInput"),
+    tableColsInput: document.getElementById("tableColsInput"),
+    closeTableInsertBtn: document.getElementById("closeTableInsertBtn"),
+    cancelTableInsertBtn: document.getElementById("cancelTableInsertBtn"),
+    confirmTableInsertBtn: document.getElementById("confirmTableInsertBtn"),
+
+    lightboxModal: document.getElementById("lightboxModal"),
+    lightboxImage: document.getElementById("lightboxImage"),
+    lightboxCloseBtn: document.getElementById("lightboxCloseBtn")
+  });
+}
+
+/* ---------- basic utils ---------- */
+
+function uid(prefix = "id") {
+  if (window.crypto && crypto.randomUUID) return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatDateLocal(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function todayStr() {
+  return formatDateLocal(new Date());
+}
+
+function addDays(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return formatDateLocal(d);
+}
+
+function getScheduleDateByStage(stage, baseDate = todayStr()) {
+  const safe = Math.max(0, Math.min(Number(stage) || 0, CURVE_DAYS.length - 1));
+  return addDays(baseDate, CURVE_DAYS[safe]);
+}
+
+function getCurveStageLabel(stage) {
+  const safe = Math.max(0, Math.min(Number(stage) || 0, CURVE_DAYS.length - 1));
+  if (safe === 0) return "新卡 / 今天";
+  return `第 ${safe} 階段（${CURVE_DAYS[safe]} 天後）`;
+}
+
+function formatDisplayDate(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(`${dateStr}T00:00:00`);
+  return d.toLocaleDateString("zh-TW", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function escapeHtml(str = "") {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function escapeAttr(str = "") {
+  return escapeHtml(str).replaceAll("`", "&#096;");
+}
+
+function stripHtml(html = "") {
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return (div.textContent || div.innerText || "").trim();
+}
+
+function textToHtml(text = "") {
+  return escapeHtml(text).replace(/\n/g, "<br>");
+}
+
+function nl2brHtml(text = "") {
+  return textToHtml(text);
+}
+
+function getPlainPreviewFromHtml(html = "", limit = 36) {
+  const text = stripHtml(html);
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
+function clamp(num, min, max) {
+  return Math.max(min, Math.min(max, Number(num) || 0));
+}
+
+function clone(value) {
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
+
+function shuffleArray(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function getImportanceLabel(level) {
+  return { high: "高", medium: "中", low: "低" }[level] || "中";
+}
+
+function getDifficultyLabel(level) {
+  return { hard: "困難", medium: "中等", easy: "容易" }[level] || "中等";
+}
+
+function getFitClass(text) {
+  const len = [...String(text || "")].length;
+  if (len <= 10) return "fit-xl";
+  if (len <= 28) return "fit-lg";
+  if (len <= 80) return "fit-md";
+  return "fit-sm";
+}
+
+function showToast(title, body = "", type = "info") {
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `<strong>${escapeHtml(title)}</strong>${body ? `<div>${escapeHtml(body)}</div>` : ""}`;
+  els.toastContainer.appendChild(toast);
+  setTimeout(() => toast.remove(), 3200);
+}
+
+/* ---------- IndexedDB ---------- */
+
+function openKeyValueDb(name, version, storeName) {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("此瀏覽器不支援 IndexedDB"));
+      return;
+    }
+
+    const req = indexedDB.open(name, version);
+
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.createObjectStore(storeName, { keyPath: "id" });
+      }
+    };
+
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function kvGet(db, storeName, id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readonly");
+    const req = tx.objectStore(storeName).get(id);
+    req.onsuccess = () => resolve(req.result ? req.result.value : null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function kvSet(db, storeName, id, value) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).put({ id, value });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function filePut(record) {
+  return new Promise((resolve, reject) => {
+    const tx = fileDb.transaction(FILE_STORE, "readwrite");
+    tx.objectStore(FILE_STORE).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function fileGet(id) {
+  return new Promise((resolve, reject) => {
+    const tx = fileDb.transaction(FILE_STORE, "readonly");
+    const req = tx.objectStore(FILE_STORE).get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function fileGetAll() {
+  return new Promise((resolve, reject) => {
+    const tx = fileDb.transaction(FILE_STORE, "readonly");
+    const req = tx.objectStore(FILE_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function fileClear() {
+  return new Promise((resolve, reject) => {
+    const tx = fileDb.transaction(FILE_STORE, "readwrite");
+    const req = tx.objectStore(FILE_STORE).clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function requestPersistentStorage() {
+  try {
+    if (navigator.storage && navigator.storage.persist) {
+      await navigator.storage.persist();
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/* ---------- file helpers ---------- */
+
+function inferMimeType(name = "", fallback = "") {
+  if (fallback) return fallback;
+  const ext = String(name).toLowerCase().split(".").pop();
+  const map = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif: "image/gif",
+    pdf: "application/pdf",
+    txt: "text/plain",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+function isImageLikeFile(file) {
+  if (!file) return false;
+  const type = file.type || inferMimeType(file.name || "", "");
+  if (type.startsWith("image/")) return true;
+  return /\.(png|jpe?g|webp|gif)$/i.test(file.name || "");
+}
+
+function normalizeFileForStorage(file) {
+  if (file instanceof File && file.type) return file;
+  const type = inferMimeType(file.name || "file", file.type || "");
+  return new File([file], file.name || "file", { type });
+}
+
+async function saveBlobToDb(file, customId = null) {
+  const normalized = normalizeFileForStorage(file);
+  const id = customId || uid("file");
+  const type = inferMimeType(normalized.name, normalized.type);
+
+  await filePut({
+    id,
+    name: normalized.name || "file",
+    type,
+    blob: normalized,
+    createdAt: Date.now()
+  });
+
+  return {
+    id,
+    name: normalized.name || "file",
+    type,
+    size: normalized.size || 0
+  };
+}
+
+async function buildObjectUrl(fileId) {
+  if (!fileId) return "";
+  if (objectUrlCache.has(fileId)) return objectUrlCache.get(fileId);
+
+  const record = await fileGet(fileId);
+  if (!record?.blob) return "";
+
+  const url = URL.createObjectURL(record.blob);
+  objectUrlCache.set(fileId, url);
+  return url;
+}
+
+function revokeAllObjectUrls() {
+  for (const url of objectUrlCache.values()) URL.revokeObjectURL(url);
+  objectUrlCache.clear();
+}
+
+async function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, data] = dataUrl.split(",");
+  const mime = header.match(/data:(.*?);base64/)?.[1] || "application/octet-stream";
+  const bytes = atob(data);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i += 1) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+/* ---------- state ---------- */
+
+function defaultState() {
+  const now = Date.now();
+  const decks = DEFAULT_DECKS.map((deck, index) => ({
+    id: index === 0 ? "uncategorized" : uid("deck"),
+    name: deck.name,
+    color: deck.color,
+    protected: !!deck.protected,
+    createdAt: now
+  }));
+
+  return {
+    version: 20,
+    decks,
+    notes: [],
+    progress: {
+      streakDays: 0,
+      lastStudyDate: "",
+      reviewDates: {},
+      creamPoints: 0,
+      cakesCompleted: 0
+    },
+    settings: {
+      theme: "cream",
+      reduceMotion: false,
+      defaultReminderTime: "09:00",
+      soundEnabled: true,
+      soundVolume: 70,
+      notificationsEnabled: false,
+      splitRatio: 50,
+      cakeKind: "🍰",
+      cakeGoal: 30
+    }
+  };
+}
+
+async function loadAppState() {
+  const saved = await kvGet(stateDb, STATE_STORE, STATE_KEY);
+  if (saved) return normalizeAppState(saved);
+
+  const legacy = loadLegacyState();
+  if (legacy) {
+    const normalized = normalizeAppState(legacy);
+    await saveStateNow(normalized, "已遷移舊資料");
+    showToast("已遷移舊資料", "原本 localStorage 資料已轉到 IndexedDB。", "success");
+    return normalized;
+  }
+
+  const fresh = defaultState();
+  await saveStateNow(fresh, "已建立資料庫");
+  return fresh;
+}
+
+function loadLegacyState() {
+  for (const key of LEGACY_KEYS) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed;
+    } catch {
+      // continue
+    }
+  }
+
+  return null;
+}
+
+function normalizeAppState(raw) {
+  const base = defaultState();
+  const s = {
+    ...base,
+    ...raw,
+    settings: { ...base.settings, ...(raw.settings || {}) },
+    progress: { ...base.progress, ...(raw.progress || {}) }
+  };
+
+  if (!Array.isArray(raw.decks)) {
+    s.decks = base.decks;
+  } else {
+    s.decks = raw.decks.map(deck => ({
+      id: deck.id || uid("deck"),
+      name: deck.name || "Deck",
+      color: deck.color || "#eeeeee",
+      protected: !!deck.protected || deck.id === "uncategorized",
+      createdAt: deck.createdAt || Date.now()
+    }));
+  }
+
+  if (!s.decks.some(deck => deck.id === "uncategorized")) {
+    s.decks.unshift({
+      id: "uncategorized",
+      name: "Uncategorized",
+      color: "#eeeeee",
+      protected: true,
+      createdAt: Date.now()
+    });
+  }
+
+  const deckNameMap = new Map(s.decks.map(deck => [deck.name, deck.id]));
+
+  if (Array.isArray(raw.notes)) {
+    s.notes = raw.notes.map(note => normalizeNote(note, s.decks, deckNameMap));
+  } else if (Array.isArray(raw.cards)) {
+    s.notes = raw.cards.map(card => normalizeNote(convertCardToNote(card, s.decks), s.decks, deckNameMap));
+  } else {
+    s.notes = [];
+  }
+
+  return s;
+}
+
+function convertCardToNote(card, decks) {
+  const deck = decks.find(d => d.id === card.deckId) || decks[0];
+  const createdAt = card.createdAt ? formatDateLocal(card.createdAt) : todayStr();
+  const updatedAt = card.updatedAt ? formatDateLocal(card.updatedAt) : createdAt;
+  const dueDate = card.dueAt ? formatDateLocal(card.dueAt) : todayStr();
+
+  let questionHtml = nl2brHtml(card.front || "");
+  let answerHtml = nl2brHtml(card.back || "");
+
+  if (Array.isArray(card.frontImages)) {
+    for (const img of card.frontImages) {
+      if (img?.data) questionHtml += `<p><img src="${img.data}" alt=""></p>`;
+    }
+  }
+
+  if (Array.isArray(card.backImages)) {
+    for (const img of card.backImages) {
+      if (img?.data) answerHtml += `<p><img src="${img.data}" alt=""></p>`;
+    }
+  }
+
+  return {
+    id: card.id || uid("note"),
+    deckId: deck.id,
+    subject: deck.name,
+    questionHtml,
+    answerHtml,
+    question: stripHtml(questionHtml),
+    answer: stripHtml(answerHtml),
+    createdAt,
+    updatedAt,
+    nextReviewDate: dueDate,
+    reviewStage: Number(card.stage || 0),
+    mastered: !!card.mastered,
+    wrongCount: Number(card.wrongCount || 0),
+    lapseCount: Number(card.lapseCount || 0),
+    reviewCount: Number(card.reviewCount || 0),
+    correctCount: Number(card.correctCount || 0),
+    lastCompletedDate: card.reviewedAt ? formatDateLocal(card.reviewedAt) : "",
+    reviewHistory: card.history || []
+  };
+}
+
+function normalizeMissedPoints(points = []) {
+  if (!Array.isArray(points)) return [];
+
+  return points
+    .filter(point => point && typeof point === "object")
+    .map(point => ({
+      id: point.id || uid("mp"),
+      text: point.text || point.label || point.name || "未命名常漏點",
+      count: Number(point.count || 0),
+      active: !!point.active,
+      side: point.side || point.missedPointSide || "answer",
+      createdAt: point.createdAt || todayStr(),
+      updatedAt: point.updatedAt || todayStr()
+    }));
+}
+
+function normalizeNote(note, decks, deckNameMap) {
+  const fallbackDeck = decks.find(d => d.id === "uncategorized") || decks[0];
+  let deckId = note.deckId;
+
+  if (!deckId && note.subject && deckNameMap.has(note.subject)) {
+    deckId = deckNameMap.get(note.subject);
+  }
+
+  if (!decks.some(deck => deck.id === deckId)) {
+    deckId = fallbackDeck.id;
+  }
+
+  const deck = decks.find(d => d.id === deckId) || fallbackDeck;
+  const reviewStage = clamp(note.reviewStage ?? note.stage ?? 0, 0, CURVE_DAYS.length - 1);
+
+  const questionHtml = sanitizeRichHtml(note.questionHtml || nl2brHtml(note.question || note.front || ""));
+  const answerHtml = sanitizeRichHtml(note.answerHtml || nl2brHtml(note.answer || note.back || ""));
+
+  return {
+    id: note.id || uid("note"),
+    deckId,
+    subject: deck.name,
+    question: note.question || stripHtml(questionHtml),
+    answer: note.answer || stripHtml(answerHtml),
+    questionHtml,
+    answerHtml,
+    starred: !!note.starred,
+    importance: note.importance || "medium",
+    difficulty: note.difficulty || "medium",
+    scheduleMode: note.scheduleMode || "curve",
+    nextReviewDate: note.nextReviewDate || getScheduleDateByStage(reviewStage),
+    reminderTime: note.reminderTime || "09:00",
+    notes: note.notes || "",
+    images: Array.isArray(note.images) ? note.images : [],
+    files: Array.isArray(note.files) ? note.files : [],
+	missedPoints: normalizeMissedPoints(note.missedPoints),
+    createdAt: note.createdAt || todayStr(),
+    updatedAt: note.updatedAt || todayStr(),
+    reviewStage,
+    reviewHistory: Array.isArray(note.reviewHistory) ? note.reviewHistory : [],
+    lastCompletedDate: note.lastCompletedDate || "",
+    remindedAt: note.remindedAt || "",
+    mastered: !!note.mastered,
+    lastReviewResult: note.lastReviewResult || "",
+    wrongCount: Number(note.wrongCount || 0),
+    lapseCount: Number(note.lapseCount || 0),
+    correctCount: Number(note.correctCount || 0),
+    reviewCount: Number(note.reviewCount || 0),
+    _flipped: !!note._flipped
+  };
+}
+
+function requestSave(message = "自動儲存中…") {
+  dirty = true;
+  setSaveStatus("saving", message);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveStateNow(appState), 450);
+}
+
+async function saveStateNow(customState = appState, successMessage = "已儲存") {
+  if (!stateDb) return;
+
+  try {
+    await kvSet(stateDb, STATE_STORE, STATE_KEY, customState);
+    dirty = false;
+    setSaveStatus("saved", successMessage);
+  } catch (error) {
+    console.error(error);
+    setSaveStatus("error", "儲存失敗");
+    showToast("儲存失敗", "可能是瀏覽器空間不足。請先匯出備份。", "error");
+  }
+}
+
+function setSaveStatus(status, text) {
+  els.saveDot.classList.remove("saving", "error");
+  if (status === "saving") els.saveDot.classList.add("saving");
+  if (status === "error") els.saveDot.classList.add("error");
+  els.saveText.textContent = text;
+}
+
+window.addEventListener("beforeunload", event => {
+  if (dirty) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+
+/* ---------- rich text sanitizer ---------- */
+
+function unwrapNode(node) {
+  const parent = node.parentNode;
+  if (!parent) return;
+  while (node.firstChild) parent.insertBefore(node.firstChild, node);
+  parent.removeChild(node);
+}
+
+function cleanAllowedStyle(styleString = "", tag = "") {
+  if (!styleString) return "";
+  const temp = document.createElement("span");
+  temp.setAttribute("style", styleString);
+  const style = temp.style;
+  const rules = [];
+
+  const fontWeight = style.fontWeight || "";
+  const weightNum = Number.parseInt(fontWeight, 10);
+  if (/bold/i.test(fontWeight) || (!Number.isNaN(weightNum) && weightNum >= 600)) {
+    rules.push("font-weight:700");
+  }
+
+  if (style.fontStyle === "italic") rules.push("font-style:italic");
+
+  const textDecoration = style.textDecoration || style.textDecorationLine || "";
+  if (/underline/i.test(textDecoration)) rules.push("text-decoration:underline");
+
+  const bg = style.backgroundColor || "";
+  if (bg && !/transparent|rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i.test(bg)) {
+    rules.push(`background-color:${bg}`);
+  }
+
+  const color = style.color || "";
+  if (color) rules.push(`color:${color}`);
+
+  const textAlign = style.textAlign || "";
+  if (["left", "right", "center", "justify"].includes(textAlign)) {
+    rules.push(`text-align:${textAlign}`);
+  }
+
+  if (tag === "SPAN") {
+    const width = style.width || "";
+    const height = style.height || "";
+    if (/^\d+(\.\d+)?(px|%)$/.test(width)) rules.push(`width:${width}`);
+    if (/^\d+(\.\d+)?(px|%)$/.test(height)) rules.push(`height:${height}`);
+  }
+
+  return rules.join(";");
+}
+
+function normalizeTablesInRoot(root) {
+  root.querySelectorAll("table").forEach(table => {
+    [...table.querySelectorAll("*")].forEach(el => {
+      if (!["TABLE", "THEAD", "TBODY", "TR", "TH", "TD"].includes(el.tagName)) {
+        unwrapNode(el);
+      }
+    });
+
+    if (!table.querySelector("tbody")) {
+      const tbody = document.createElement("tbody");
+      while (table.firstChild) tbody.appendChild(table.firstChild);
+      table.appendChild(tbody);
+    }
+
+    const rows = table.querySelectorAll("tr");
+    if (rows[0]) {
+      [...rows[0].children].forEach(cell => {
+        if (cell.tagName === "TD") {
+          const th = document.createElement("th");
+          th.innerHTML = cell.innerHTML;
+          cell.replaceWith(th);
+        }
+      });
+    }
+  });
+}
+
+function cleanupHighlightSpans(root) {
+  if (!root) return;
+
+  root.querySelectorAll("span[data-highlight], mark").forEach(span => {
+    if (span.tagName === "MARK") {
+      span.dataset.highlight = span.style.backgroundColor || "#ffef76";
+      span.classList.add("highlight-chip");
+      if (!span.style.backgroundColor) span.style.backgroundColor = "#ffef76";
+    }
+
+    if (!span.textContent.trim() && !span.querySelector("img")) {
+      span.remove();
+      return;
+    }
+
+    span.classList.add("highlight-chip");
+    if (!span.style.backgroundColor && span.dataset.highlight) {
+      span.style.backgroundColor = span.dataset.highlight;
+    }
+  });
+}
+
+function sanitizeRichHtml(html = "") {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html;
+
+  wrapper.querySelectorAll("script, style, meta, link, iframe, object, embed").forEach(el => el.remove());
+
+  const allowedTags = new Set([
+    "B", "STRONG", "I", "EM", "U", "BR", "DIV", "P", "SPAN", "UL", "OL", "LI",
+    "IMG", "TABLE", "THEAD", "TBODY", "TR", "TH", "TD", "BLOCKQUOTE", "MARK", "A"
+  ]);
+
+  const walk = node => {
+    [...node.childNodes].forEach(child => walk(child));
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const tag = node.tagName;
+
+    if (!allowedTags.has(tag)) {
+      unwrapNode(node);
+      return;
+    }
+
+    [...node.attributes].forEach(attr => {
+      const name = attr.name.toLowerCase();
+
+      if (name.startsWith("on")) {
+        node.removeAttribute(attr.name);
+        return;
+      }
+
+      if (tag === "IMG") {
+        if (!["src", "alt", "class", "data-file-id"].includes(name)) node.removeAttribute(attr.name);
+      } else if (tag === "A") {
+        if (!["href", "target", "rel", "download", "style"].includes(name)) node.removeAttribute(attr.name);
+      } else if (["TD", "TH"].includes(tag)) {
+        if (!["colspan", "rowspan", "style"].includes(name)) node.removeAttribute(attr.name);
+      } else {
+  if (![
+    "style",
+    "data-highlight",
+    "class",
+    "contenteditable",
+
+    /*
+      常漏點 marker 必須保留。
+      否則正文右鍵永遠找不到 [data-missed-point-id]。
+    */
+    "data-missed-point-id",
+    "data-missed-point-side"
+  ].includes(name)) {
+    node.removeAttribute(attr.name);
+  }
+}
+    });
+
+    if (node.hasAttribute("style")) {
+      const cleaned = cleanAllowedStyle(node.getAttribute("style"), tag);
+      if (cleaned) node.setAttribute("style", cleaned);
+      else node.removeAttribute("style");
+    }
+
+    if (tag === "A") {
+      const href = node.getAttribute("href") || "";
+      if (!/^(https?:|mailto:|#)/i.test(href)) node.removeAttribute("href");
+      node.setAttribute("rel", "noopener noreferrer");
+      if (!node.getAttribute("target")) node.setAttribute("target", "_blank");
+    }
+
+    if (tag === "IMG") {
+      node.classList.add("inline-rich-image", "js-lightboxable");
+      const src = node.getAttribute("src") || "";
+      const fileId = node.getAttribute("data-file-id") || "";
+      const isAllowedSrc =
+        src.startsWith("data:image/") ||
+        src.startsWith("blob:") ||
+        src.startsWith("http://") ||
+        src.startsWith("https://");
+
+      if (!fileId && !isAllowedSrc) {
+        node.remove();
+        return;
+      }
+    }
+
+    if (tag === "SPAN" && node.classList.contains("inline-image-box")) {
+      node.setAttribute("contenteditable", "false");
+    }
+
+    if (tag === "MARK" && !node.style.backgroundColor) node.style.backgroundColor = "#ffef76";
+
+    if (node.style.backgroundColor && !node.dataset.highlight && !node.classList.contains("inline-image-box")) {
+      node.dataset.highlight = node.style.backgroundColor;
+    }
+
+    if (node.dataset.highlight || tag === "MARK") node.classList.add("highlight-chip");
+  };
+
+  [...wrapper.childNodes].forEach(child => walk(child));
+  normalizeTablesInRoot(wrapper);
+  cleanupHighlightSpans(wrapper);
+
+  wrapper.querySelectorAll("img[data-file-id]").forEach(img => img.removeAttribute("src"));
+
+  return wrapper.innerHTML.trim();
+}
+
+function normalizePastedHtml(html = "") {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  doc.querySelectorAll("script, style, meta, link, iframe, object, embed").forEach(el => el.remove());
+  normalizeTablesInRoot(doc.body);
+  return sanitizeRichHtml(doc.body.innerHTML || "");
+}
+
+function clearRichEditor(editor) {
+  editor.innerHTML = "";
+}
+
+function setEditorHtml(editor, html = "") {
+  editor.innerHTML = sanitizeRichHtml(html || "");
+  hydrateRichContentImages(editor);
+}
+
+function getEditorHtml(editor) {
+  return sanitizeRichHtml(editor.innerHTML || "");
+}
+
+function focusEditorById(editorId) {
+  const editor = document.getElementById(editorId);
+  if (!editor) return;
+  activeEditorId = editorId;
+  editor.focus();
+}
+
+function insertHtmlAtCursor(html) {
+  document.execCommand("insertHTML", false, html);
+}
+
+function applyEditorCommand(editorId, cmd) {
+  focusEditorById(editorId);
+  document.execCommand(cmd, false, null);
+}
+
+function applyListCommand(editorId, type) {
+  focusEditorById(editorId);
+  document.execCommand(type === "ul" ? "insertUnorderedList" : "insertOrderedList", false, null);
+}
+
+function applyUndoRedo(editorId, action) {
+  focusEditorById(editorId);
+  document.execCommand(action, false, null);
+}
+
+function applyClearFormat(editorId) {
+  focusEditorById(editorId);
+  document.execCommand("removeFormat", false, null);
+}
+
+function applyTextColor(editorId, color) {
+  focusEditorById(editorId);
+  document.execCommand("foreColor", false, color);
+}
+
+function applyCustomHighlight(editorId, color) {
+  focusEditorById(editorId);
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+
+  const range = selection.getRangeAt(0);
+  if (range.collapsed) return;
+
+  const span = document.createElement("span");
+  span.setAttribute("data-highlight", color);
+  span.className = "highlight-chip";
+  span.style.backgroundColor = color;
+
+  try {
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    cleanupHighlightSpans(document.getElementById(editorId));
+  } catch {
+    document.execCommand("hiliteColor", false, color);
+  }
+
+  selection.removeAllRanges();
+}
+
+function clearCustomHighlight(editorId) {
+  focusEditorById(editorId);
+  const editor = document.getElementById(editorId);
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+
+  const range = selection.getRangeAt(0);
+  let root = range.commonAncestorContainer;
+  if (root.nodeType === Node.TEXT_NODE) root = root.parentNode;
+
+  const touched = new Set();
+
+  if (!range.collapsed && root.querySelectorAll) {
+    root.querySelectorAll("span[data-highlight], mark").forEach(node => {
+      try {
+        if (range.intersectsNode(node)) touched.add(node);
+      } catch {
+        // ignore
+      }
+    });
+  }
+
+  let node = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentNode : range.startContainer;
+  while (node && node !== editor && node !== document.body) {
+    if (node.matches?.("span[data-highlight], mark")) touched.add(node);
+    node = node.parentNode;
+  }
+
+  touched.forEach(n => unwrapNode(n));
+  cleanupHighlightSpans(editor);
+}
+
+function insertTableAtCursor(rows, cols) {
+  let html = "<table><tbody><tr>";
+  for (let c = 0; c < cols; c += 1) html += `<th>標題 ${c + 1}</th>`;
+  html += "</tr>";
+
+  for (let r = 1; r < rows; r += 1) {
+    html += "<tr>";
+    for (let c = 0; c < cols; c += 1) html += "<td>內容</td>";
+    html += "</tr>";
+  }
+
+  html += "</tbody></table><p><br></p>";
+  insertHtmlAtCursor(html);
+}
+
+function openTableInsertModal(targetEditorId) {
+  pendingTableTarget = targetEditorId;
+  els.tableRowsInput.value = 2;
+  els.tableColsInput.value = 2;
+  els.tableInsertModal.classList.remove("hidden");
+}
+
+function closeTableInsertModal() {
+  pendingTableTarget = "";
+  els.tableInsertModal.classList.add("hidden");
+}
+
+/* ---------- image paste / drop ---------- */
+
+function extractFilesFromDataTransfer(dataTransfer) {
+  const files = [];
+  if (!dataTransfer) return files;
+
+  if (dataTransfer.items?.length) {
+    [...dataTransfer.items].forEach(item => {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    });
+  }
+
+  if (dataTransfer.files?.length) {
+    [...dataTransfer.files].forEach(file => files.push(file));
+  }
+
+  const map = new Map();
+  files.forEach(file => {
+    const key = `${file.name}_${file.size}_${file.type}`;
+    if (!map.has(key)) map.set(key, file);
+  });
+
+  return [...map.values()];
+}
+
+async function hydrateRichContentImages(root) {
+  if (!root) return;
+  const images = root.querySelectorAll("img[data-file-id]");
+
+  for (const img of images) {
+    const fileId = img.dataset.fileId;
+    if (!fileId) continue;
+
+    const url = await buildObjectUrl(fileId);
+    if (!url) continue;
+
+    img.src = url;
+    img.classList.add("js-lightboxable", "inline-rich-image");
+  }
+}
+
+async function insertInlineImageFiles(editorId, files) {
+  const safeFiles = [...files].filter(isImageLikeFile);
+  if (!safeFiles.length) return;
+
+  focusEditorById(editorId);
+
+  for (const file of safeFiles) {
+    const meta = await saveBlobToDb(file);
+    const html = `
+      <span class="inline-image-box" contenteditable="false" style="width:360px">
+        <img data-file-id="${escapeAttr(meta.id)}" alt="${escapeAttr(meta.name)}" class="inline-rich-image js-lightboxable">
+      </span>
+      <p><br></p>
+    `;
+    insertHtmlAtCursor(html);
+  }
+
+  const editor = document.getElementById(editorId);
+  await hydrateRichContentImages(editor);
+  playSound("insert");
+}
+
+async function insertInlineImageToEditor(editorId, inputEl) {
+  const files = [...(inputEl.files || [])];
+  await insertInlineImageFiles(editorId, files);
+  inputEl.value = "";
+}
+
+async function handleEditorDrop(event, editor) {
+  event.preventDefault();
+  event.stopPropagation();
+  editor.classList.remove("drag-over");
+  activeEditorId = editor.id;
+  editor.focus();
+
+  const files = extractFilesFromDataTransfer(event.dataTransfer);
+  const imageFiles = files.filter(isImageLikeFile);
+
+  if (imageFiles.length) {
+    await insertInlineImageFiles(editor.id, imageFiles);
+    return;
+  }
+
+  const html = event.dataTransfer?.getData("text/html") || "";
+  if (html) {
+    insertHtmlAtCursor(normalizePastedHtml(html));
+    return;
+  }
+
+  const text = event.dataTransfer?.getData("text/plain") || "";
+  if (text && !files.length) {
+    insertHtmlAtCursor(textToHtml(text));
+  }
+}
+
+async function handleEditorPaste(event, editor) {
+  const items = [...(event.clipboardData?.items || [])];
+  const imageFiles = items
+    .filter(item => item.kind === "file")
+    .map(item => item.getAsFile())
+    .filter(Boolean)
+    .filter(isImageLikeFile);
+
+  if (imageFiles.length) {
+    event.preventDefault();
+    activeEditorId = editor.id;
+    editor.focus();
+    await insertInlineImageFiles(editor.id, imageFiles);
+    return;
+  }
+
+  const html = event.clipboardData?.getData("text/html") || "";
+  const plain = event.clipboardData?.getData("text/plain") || "";
+
+  if (html) {
+    event.preventDefault();
+    activeEditorId = editor.id;
+    editor.focus();
+    const normalized = normalizePastedHtml(html);
+    insertHtmlAtCursor(normalized || textToHtml(plain));
+    return;
+  }
+
+  if (plain) {
+    event.preventDefault();
+    activeEditorId = editor.id;
+    editor.focus();
+    insertHtmlAtCursor(textToHtml(plain));
+  }
+}
+
+function bindEditorShortcuts(editor) {
+  editor.addEventListener("keydown", e => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+
+    const key = e.key.toLowerCase();
+
+    if (key === "b") {
+      e.preventDefault();
+      document.execCommand("bold");
+    } else if (key === "i") {
+      e.preventDefault();
+      document.execCommand("italic");
+    } else if (key === "u") {
+      e.preventDefault();
+      document.execCommand("underline");
+    } else if (key === "z" && !e.shiftKey) {
+      e.preventDefault();
+      document.execCommand("undo");
+    } else if (key === "y" || (key === "z" && e.shiftKey)) {
+      e.preventDefault();
+      document.execCommand("redo");
+    }
+  });
+}
+
+function bindEditorSurface(editor) {
+  if (!editor) return;
+
+  bindEditorShortcuts(editor);
+
+  editor.addEventListener("focus", () => {
+    activeEditorId = editor.id;
+  });
+
+  editor.addEventListener("paste", e => handleEditorPaste(e, editor));
+  editor.addEventListener("drop", e => handleEditorDrop(e, editor));
+
+  editor.addEventListener("dragover", e => {
+    e.preventDefault();
+    editor.classList.add("drag-over");
+  });
+
+  editor.addEventListener("dragleave", () => editor.classList.remove("drag-over"));
+}
+
+/* ---------- deck helpers ---------- */
+
+function getDeck(deckId) {
+  return appState.decks.find(deck => deck.id === deckId) || appState.decks[0];
+}
+
+function getDeckName(deckId) {
+  return getDeck(deckId)?.name || "Deck";
+}
+
+function getDeckStats(deckId) {
+  const notes = appState.notes.filter(note => note.deckId === deckId);
+  return {
+    total: notes.length,
+    due: notes.filter(note => getStudyState(note) === "due").length,
+    starred: notes.filter(note => note.starred).length,
+    mastered: notes.filter(note => note.mastered).length
+  };
+}
+
+function populateDeckSelects() {
+  const options = appState.decks
+    .map(deck => `<option value="${escapeAttr(deck.id)}">${escapeHtml(deck.name)}</option>`)
+    .join("");
+
+  els.deckInput.innerHTML = options;
+  els.filterDeck.innerHTML = `<option value="">全部 Deck</option>${options}`;
+}
+
+/* ---------- theme / settings ---------- */
+
+function applyTheme(theme) {
+  const safeTheme = THEMES[theme] ? theme : "cream";
+  appState.settings.theme = safeTheme;
+
+  document.body.dataset.theme = safeTheme;
+  document.documentElement.dataset.theme = safeTheme;
+  document.body.classList.toggle("reduce-motion", !!appState.settings.reduceMotion);
+
+  els.brandIcon.textContent = THEMES[safeTheme]?.icon || "🧈";
+
+  els.themeButtons.forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.theme === safeTheme);
+  });
+}
+
+function renderSettings() {
+  els.defaultReminderInput.value = appState.settings.defaultReminderTime || "09:00";
+  els.soundToggle.checked = !!appState.settings.soundEnabled;
+  els.soundVolumeInput.value = Number(appState.settings.soundVolume ?? 70);
+  els.reduceMotionToggle.checked = !!appState.settings.reduceMotion;
+  els.cakeKindInput.value = appState.settings.cakeKind || "🍰";
+  els.cakeGoalInput.value = appState.settings.cakeGoal || 30;
+  applyTheme(appState.settings.theme || "cream");
+}
+
+/* ---------- UI common ---------- */
+
+function updateTodayDateText() {
+  const now = new Date();
+  els.todayDateText.textContent = now.toLocaleDateString("zh-TW", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "long"
+  });
+}
+
+function switchView(view) {
+  currentView = view;
+
+  els.homeView.classList.toggle("active", view === "home");
+  els.notesView.classList.toggle("active", view === "notes");
+  els.calendarView.classList.toggle("active", view === "calendar");
+  els.reviewView.classList.toggle("active", view === "review");
+  els.settingsView.classList.toggle("active", view === "settings");
+
+  els.navBtns.forEach(btn => btn.classList.toggle("active", btn.dataset.view === view));
+
+  const titles = {
+    home: ["首頁", "今天也溫柔地學一點、記久一點。"],
+    notes: [currentDeckWall ? getDeckName(currentDeckWall) : "卡片庫", "點 Deck 進入該科卡片牆"],
+    calendar: ["日曆", "查看複習排程"],
+    review: ["複習", "今天該複習的內容都在這裡"],
+    settings: ["設定", "調整提醒、主題與備份"]
+  };
+
+  els.pageTitle.textContent = titles[view][0];
+  els.pageSubtitle.textContent = titles[view][1];
+}
+
+function getStudyState(note) {
+  const today = todayStr();
+  if (note.mastered) return "mastered";
+  if (note.wrongCount > 0 && note.nextReviewDate <= today && note.lastCompletedDate !== today) return "wrong";
+  if (note.reviewStage === 0 && !note.lastCompletedDate) return "new";
+  if (note.nextReviewDate <= today && note.lastCompletedDate !== today) return "due";
+  return "normal";
+}
+
+function getStudyStateLabel(note) {
+  const state = getStudyState(note);
+  if (state === "mastered") return "已熟記";
+  if (state === "new") return "新卡";
+  if (state === "due") return "未複習";
+  if (state === "wrong") return "錯題";
+  return "學習中";
+}
+
+/* ---------- render home / notes / calendar / review ---------- */
+
+function renderStats() {
+  const today = todayStr();
+
+  els.statDueToday.textContent = appState.notes.filter(n =>
+    n.nextReviewDate <= today && n.lastCompletedDate !== today && !n.mastered
+  ).length;
+
+  els.statNewToday.textContent = appState.notes.filter(n => n.createdAt === today).length;
+
+  els.statDoneToday.textContent = appState.progress.reviewDates[today] || 0;
+  els.statStreak.textContent = appState.progress.streakDays || 0;
+}
+
+function renderSubjectDecks() {
+  els.subjectDeckGrid.innerHTML = appState.decks.map(deck => {
+    const stats = getDeckStats(deck.id);
+
+    return `
+      <div class="deck-wrap">
+        <button class="subject-deck" style="--deck-color:${escapeAttr(deck.color)}" onclick="openDeckWall('${escapeAttr(deck.id)}')">
+          <div class="subject-deck-top">
+            <span class="deck-name">${escapeHtml(deck.name)}</span>
+            <strong>${stats.total}</strong>
+          </div>
+          <div class="soft-text">${stats.due} 張到期 · ${stats.mastered} 張熟記</div>
+          <div class="subject-deck-bottom">
+            <span>⚡ ${stats.due}</span>
+            <span>★ ${stats.starred}</span>
+          </div>
+        </button>
+
+        <div class="deck-actions-row">
+          <button class="deck-study-btn" onclick="openStudyPreference({type:'deck', deckId:'${escapeAttr(deck.id)}'})">開始複習</button>
+          <button class="deck-study-btn" onclick="openModal(null, { deckId:'${escapeAttr(deck.id)}' })">新增卡片</button>
+          <button class="tiny-btn" onclick="openDeckModal('${escapeAttr(deck.id)}')">改</button>
+          <button class="tiny-btn" onclick="deleteDeck('${escapeAttr(deck.id)}')">刪</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderTodayTasks() {
+  const today = todayStr();
+  const tasks = appState.notes
+    .filter(n => n.nextReviewDate <= today && n.lastCompletedDate !== today && !n.mastered)
+    .sort((a, b) => `${a.nextReviewDate} ${a.reminderTime}`.localeCompare(`${b.nextReviewDate} ${b.reminderTime}`))
+    .slice(0, 12);
+
+  if (!tasks.length) {
+    els.todayTasksList.innerHTML = `<div class="empty-state">今天沒有待辦，休息一下也很好。</div>`;
+    return;
+  }
+
+  els.todayTasksList.innerHTML = tasks.map(note => `
+    <div class="task-card">
+      <div class="task-top">
+        <div>
+          <h4 class="task-title">${escapeHtml(getPlainPreviewFromHtml(note.questionHtml, 52))}</h4>
+          <div class="soft-text">${escapeHtml(getDeckName(note.deckId))} · ${escapeHtml(getCurveStageLabel(note.reviewStage))}</div>
+        </div>
+        <button class="star-btn ${note.starred ? "active" : ""}" onclick="toggleStar('${escapeAttr(note.id)}')">${note.starred ? "★" : "☆"}</button>
+      </div>
+      <div class="badge-row">
+        <span class="badge ${note.importance}">${escapeHtml(getImportanceLabel(note.importance))}</span>
+        <span class="badge difficulty ${note.difficulty}">${escapeHtml(getDifficultyLabel(note.difficulty))}</span>
+        <span class="badge">${escapeHtml(getStudyStateLabel(note))}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+function getFilteredNotes() {
+  const q = els.searchInput.value.trim().toLowerCase();
+  const deckId = currentDeckWall || els.filterDeck.value;
+  const importance = els.filterImportance.value;
+  const difficulty = els.filterDifficulty.value;
+  const studyStateValue = els.filterStudyState.value;
+  const starred = els.filterStarred.value;
+
+  return appState.notes.filter(note => {
+    const haystack = [
+      stripHtml(note.questionHtml),
+      stripHtml(note.answerHtml),
+      getDeckName(note.deckId),
+      note.notes
+    ].join(" ").toLowerCase();
+
+    if (q && !haystack.includes(q)) return false;
+    if (deckId && note.deckId !== deckId) return false;
+    if (importance && note.importance !== importance) return false;
+    if (difficulty && note.difficulty !== difficulty) return false;
+
+    if (studyStateValue === "wrong" && note.wrongCount <= 0) return false;
+    else if (studyStateValue === "frequent" && note.wrongCount < 2 && note.lapseCount < 2) return false;
+    else if (studyStateValue && !["wrong", "frequent"].includes(studyStateValue) && getStudyState(note) !== studyStateValue) return false;
+
+    if (starred === "starred" && !note.starred) return false;
+    if (starred === "unstarred" && note.starred) return false;
+
+    return true;
+  });
+}
+
+function renderDeckWallHeader() {
+  if (!currentDeckWall) {
+    els.subjectWallHeader.classList.add("hidden");
+    els.notesSectionTitle.textContent = "所有卡片";
+    els.notesSectionHint.textContent = "點 Deck 進入該科卡片牆";
+    return;
+  }
+
+  const deck = getDeck(currentDeckWall);
+  const stats = getDeckStats(deck.id);
+
+  els.subjectWallHeader.classList.remove("hidden");
+  els.notesSectionTitle.textContent = deck.name;
+  els.notesSectionHint.textContent = "該 Deck 全部卡片牆";
+
+  els.subjectWallHeader.innerHTML = `
+    <div>
+      <h3>${escapeHtml(deck.name)}</h3>
+      <p class="soft-text">共 ${stats.total} 張卡 · 未複習 ${stats.due} 張 · 標星 ${stats.starred} 張</p>
+    </div>
+    <div class="wall-head-actions">
+      <button class="ghost-btn" onclick="openModal(null, { deckId:'${escapeAttr(deck.id)}' })">新增卡片</button>
+      <button class="ghost-btn" onclick="openStudyPreference({type:'deck', deckId:'${escapeAttr(deck.id)}'})">開始複習</button>
+      <button class="ghost-btn" onclick="clearDeckWall()">返回全部</button>
+    </div>
+  `;
+}
+
+function renderNotes() {
+  populateDeckSelects();
+  if (currentDeckWall) els.filterDeck.value = currentDeckWall;
+  renderDeckWallHeader();
+
+  const notes = getFilteredNotes().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+  if (!notes.length) {
+    els.notesList.innerHTML = `<div class="empty-state">目前沒有符合條件的卡片。</div>`;
+    return;
+  }
+
+  els.notesList.innerHTML = notes.map(note => {
+    const title = getPlainPreviewFromHtml(note.questionHtml, 42);
+    const previewText = getPlainPreviewFromHtml(note.answerHtml, 58);
+    const deck = getDeck(note.deckId);
+    const fitClass = getFitClass(stripHtml(note.questionHtml));
+
+    return `
+      <div class="wall-card creamy-card">
+        <div class="wall-card-top">
+          <div class="wall-card-tags">
+            <span class="mini-dot" style="--dot-color:${escapeAttr(deck.color)}"></span>
+            <span>${escapeHtml(deck.name)}</span>
+          </div>
+          <button class="star-btn ${note.starred ? "active" : ""}" onclick="toggleStar('${escapeAttr(note.id)}')">${note.starred ? "★" : "☆"}</button>
+        </div>
+
+        <div class="wall-title ${fitClass}" onclick="openEditModal('${escapeAttr(note.id)}')">${escapeHtml(title || "無文字問題")}</div>
+        <div class="wall-preview" onclick="openEditModal('${escapeAttr(note.id)}')">${escapeHtml(previewText || " ")}</div>
+
+        <div class="curve-row">
+          <span class="curve-chip">${escapeHtml(getCurveStageLabel(note.reviewStage))}</span>
+          <select class="curve-select" onchange="updateCurveStage('${escapeAttr(note.id)}', this.value)">
+            ${CURVE_DAYS.map((days, idx) => `<option value="${idx}" ${note.reviewStage === idx ? "selected" : ""}>${escapeHtml(getCurveStageLabel(idx))}</option>`).join("")}
+          </select>
+        </div>
+
+        <div class="wall-footer">
+          <span class="wall-state ${getStudyState(note)}">${escapeHtml(getStudyStateLabel(note))}</span>
+          <span class="wall-badge ${note.importance}">${escapeHtml(getImportanceLabel(note.importance))}</span>
+          <span class="wall-badge difficulty ${note.difficulty}">${escapeHtml(getDifficultyLabel(note.difficulty))}</span>
+        </div>
+
+        <div class="card-action-row">
+          <button class="mini-btn" onclick="openEditModal('${escapeAttr(note.id)}')">編輯</button>
+          <button class="mini-btn" onclick="openStudyPreference({type:'single', noteId:'${escapeAttr(note.id)}'})">開始複習</button>
+          <button class="mini-btn danger-lite" onclick="deleteNote('${escapeAttr(note.id)}')">刪除</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderCalendar() {
+  const d = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth(), 1);
+  const month = d.getMonth();
+  const year = d.getFullYear();
+
+  els.calendarTitle.textContent = d.toLocaleDateString("zh-TW", {
+    year: "numeric",
+    month: "long"
+  });
+
+  const weekdayNames = ["日", "一", "二", "三", "四", "五", "六"];
+  els.calendarWeekdays.innerHTML = weekdayNames.map(w => `<div class="weekday">${w}</div>`).join("");
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const prevMonthDays = new Date(year, month, 0).getDate();
+
+  const cells = [];
+
+  for (let i = 0; i < firstDay; i += 1) {
+    const day = prevMonthDays - firstDay + i + 1;
+    cells.push(buildCalendarCell(new Date(year, month - 1, day), true));
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(buildCalendarCell(new Date(year, month, day), false));
+  }
+
+  while (cells.length < 42) {
+    const nextDay = cells.length - (firstDay + daysInMonth) + 1;
+    cells.push(buildCalendarCell(new Date(year, month + 1, nextDay), true));
+  }
+
+  els.calendarGrid.innerHTML = cells.join("");
+  renderSelectedDateTasks();
+  renderCake();
+}
+
+function buildCalendarCell(dateObj, muted) {
+  const dateStr = formatDateLocal(dateObj);
+  const notes = appState.notes.filter(n => n.nextReviewDate === dateStr);
+  const done = appState.progress.reviewDates[dateStr] || 0;
+  const today = todayStr();
+  const dots = notes.slice(0, 5).map(n => `<span class="dot ${n.importance}"></span>`).join("");
+  const count = notes.length || done ? `<span class="day-count">${notes.length ? notes.length : ""}${done ? ` ✓${done}` : ""}</span>` : "";
+
+  return `
+    <button class="calendar-day ${muted ? "muted" : ""} ${dateStr === today ? "today" : ""} ${dateStr === selectedCalendarDate ? "selected" : ""}" onclick="selectCalendarDate('${dateStr}', ${dateObj.getMonth()}, ${dateObj.getFullYear()})">
+      <div class="day-top">
+        <strong>${dateObj.getDate()}</strong>
+        ${count}
+      </div>
+      <div class="dot-row">${dots}</div>
+    </button>
+  `;
+}
+
+function renderSelectedDateTasks() {
+  els.selectedDateLabel.textContent = formatDisplayDate(selectedDateTasks ? selectedCalendarDate : todayStr());
+  const notes = appState.notes.filter(note => note.nextReviewDate === selectedCalendarDate || note.createdAt === selectedCalendarDate);
+
+  if (!notes.length) {
+    els.selectedDateTasks.innerHTML = `<div class="empty-state">目前沒有內容。</div>`;
+    return;
+  }
+
+  els.selectedDateTasks.innerHTML = notes.map(note => `
+    <div class="task-card">
+      <div class="task-top">
+        <div>
+          <h4 class="task-title">${escapeHtml(getPlainPreviewFromHtml(note.questionHtml, 52))}</h4>
+          <div class="soft-text">${escapeHtml(getDeckName(note.deckId))} · ${escapeHtml(getCurveStageLabel(note.reviewStage))}</div>
+        </div>
+        <span class="badge ${note.importance}">${escapeHtml(getImportanceLabel(note.importance))}</span>
+      </div>
+
+      <div class="badge-row">
+        <span class="badge difficulty ${note.difficulty}">${escapeHtml(getDifficultyLabel(note.difficulty))}</span>
+        <span class="badge">${escapeHtml(getStudyStateLabel(note))}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderCake() {
+  const goal = Math.max(3, Number(appState.settings.cakeGoal || 30));
+  const points = appState.progress.creamPoints || 0;
+  const current = points % goal;
+  const percent = Math.min(100, Math.round((current / goal) * 100));
+
+  els.cakeEmoji.textContent = appState.settings.cakeKind || "🍰";
+  els.cakeTitle.textContent = `${appState.settings.cakeKind || "🍰"} 奶油進度`;
+  els.cakeSub.textContent = `${current} / ${goal}`;
+  els.cakeProgress.style.width = `${percent}%`;
+  els.cakeMeta.textContent = `已完成 ${appState.progress.cakesCompleted || 0} 個蛋糕 · 連續學習 ${appState.progress.streakDays || 0} 天`;
+}
+
+async function renderReviewList() {
+  const today = todayStr();
+  const notes = appState.notes
+    .filter(note => note.nextReviewDate <= today && note.lastCompletedDate !== today && !note.mastered)
+    .sort((a, b) => a.nextReviewDate.localeCompare(b.nextReviewDate));
+
+  if (!notes.length) {
+    els.reviewList.innerHTML = `<div class="empty-state">今天沒有待複習內容。</div>`;
+    return;
+  }
+
+  els.reviewList.innerHTML = notes.map(note => `
+    <div class="review-card">
+      <div class="task-top">
+        <div>
+          <h4 class="task-title">${escapeHtml(getPlainPreviewFromHtml(note.questionHtml, 52))}</h4>
+          <div class="soft-text">${escapeHtml(getDeckName(note.deckId))} · ${escapeHtml(getCurveStageLabel(note.reviewStage))}</div>
+        </div>
+        <button class="star-btn ${note.starred ? "active" : ""}" onclick="toggleStar('${escapeAttr(note.id)}')">${note.starred ? "★" : "☆"}</button>
+      </div>
+
+      <div class="flip-card" onclick="toggleReviewFlip('${escapeAttr(note.id)}', event)">
+        <div class="flip-card-inner ${note._flipped ? "flipped" : ""}">
+          <div class="flip-card-front">
+            <div class="flip-label">問題</div>
+            <div id="reviewQ_${escapeAttr(note.id)}" class="flip-content rich-content">${note.questionHtml || ""}</div>
+            <div class="study-hint">點卡片翻到答案</div>
+          </div>
+          <div class="flip-card-back">
+            <div class="flip-label">答案</div>
+            <div id="reviewA_${escapeAttr(note.id)}" class="flip-content rich-content">${note.answerHtml || ""}</div>
+            <div class="study-hint">再點一下翻回問題</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="review-actions">
+        <button class="mini-btn" onclick="handleReview('${escapeAttr(note.id)}', 'remembered')">記住了</button>
+        <button class="mini-btn" onclick="handleReview('${escapeAttr(note.id)}', 'okay')">普通</button>
+        <button class="mini-btn" onclick="handleReview('${escapeAttr(note.id)}', 'forgot')">忘了</button>
+        <button class="mini-btn" onclick="markMastered('${escapeAttr(note.id)}')">已熟記</button>
+        <button class="mini-btn" onclick="openCustomReviewModal('${escapeAttr(note.id)}')">手動指定</button>
+      </div>
+    </div>
+  `).join("");
+
+  for (const note of notes) {
+    await hydrateRichContentImages(document.getElementById(`reviewQ_${note.id}`));
+    await hydrateRichContentImages(document.getElementById(`reviewA_${note.id}`));
+  }
+}
+
+/* ---------- note modal ---------- */
+
+function resetModalDraftFiles() {
+  modalExistingImages = [];
+  modalExistingFiles = [];
+  modalDraftImages = [];
+  modalDraftFiles = [];
+  els.imageInput.value = "";
+  els.fileInput.value = "";
+  els.attachmentPreview.innerHTML = "";
+}
+
+function syncScheduleInputs() {
+  const isCurve = els.scheduleModeInput.value === "curve";
+  els.curveStageInput.disabled = !isCurve;
+
+  if (isCurve) {
+    els.nextReviewDateInput.value = getScheduleDateByStage(Number(els.curveStageInput.value || 0));
+  }
+}
+
+async function renderModalAttachmentPreview() {
+  els.attachmentPreview.innerHTML = "";
+
+  modalExistingImages.forEach((image, index) => {
+    renderAttachmentItem(image, "existing-image", index);
+  });
+
+  modalDraftImages.forEach((file, index) => {
+    const url = URL.createObjectURL(file);
+    els.attachmentPreview.insertAdjacentHTML("beforeend", `
+      <div class="attachment-item">
+        <button type="button" class="attachment-remove" data-remove-attachment="draft-image" data-index="${index}">×</button>
+        <div class="attachment-thumb-wrap">
+          <img class="attachment-thumb js-lightboxable" src="${url}" alt="${escapeAttr(file.name)}" />
+        </div>
+        <div class="attachment-name">${escapeHtml(file.name)}（新）</div>
+      </div>
+    `);
+  });
+
+  modalExistingFiles.forEach((file, index) => {
+    renderAttachmentItem(file, "existing-file", index);
+  });
+
+  modalDraftFiles.forEach((file, index) => {
+    els.attachmentPreview.insertAdjacentHTML("beforeend", `
+      <div class="attachment-item">
+        <button type="button" class="attachment-remove" data-remove-attachment="draft-file" data-index="${index}">×</button>
+        <div class="attachment-file-icon">檔案</div>
+        <div class="attachment-name">${escapeHtml(file.name)}（新）</div>
+      </div>
+    `);
+  });
+}
+
+async function renderAttachmentItem(item, type, index) {
+  const url = await buildObjectUrl(item.id);
+  if (!url) return;
+
+  if (item.type?.startsWith("image/")) {
+    els.attachmentPreview.insertAdjacentHTML("beforeend", `
+      <div class="attachment-item">
+        <button type="button" class="attachment-remove" data-remove-attachment="${type}" data-index="${index}">×</button>
+        <div class="attachment-thumb-wrap">
+          <img class="attachment-thumb js-lightboxable" src="${url}" alt="${escapeAttr(item.name)}" />
+        </div>
+        <div class="attachment-name">${escapeHtml(item.name)}</div>
+      </div>
+    `);
+  } else {
+    els.attachmentPreview.insertAdjacentHTML("beforeend", `
+      <div class="attachment-item">
+        <button type="button" class="attachment-remove" data-remove-attachment="${type}" data-index="${index}">×</button>
+        <div class="attachment-file-icon">檔案</div>
+        <a class="attachment-name" href="${url}" target="_blank" download="${escapeAttr(item.name)}">${escapeHtml(item.name)}</a>
+      </div>
+    `);
+  }
+}
+
+function removeAttachment(type, index) {
+  if (type === "existing-image") modalExistingImages.splice(index, 1);
+  if (type === "existing-file") modalExistingFiles.splice(index, 1);
+  if (type === "draft-image") modalDraftImages.splice(index, 1);
+  if (type === "draft-file") modalDraftFiles.splice(index, 1);
+  renderModalAttachmentPreview();
+}
+
+function openModal(editId = null, options = {}) {
+  els.noteForm.reset();
+  resetModalDraftFiles();
+  populateDeckSelects();
+
+  modalPresetDeckId = options.deckId || currentDeckWall || "";
+
+  els.noteId.value = "";
+  els.modalTitle.textContent = "新增卡片";
+  els.deleteNoteBtn.classList.add("hidden");
+
+  els.deckInput.value = modalPresetDeckId || appState.decks[0].id;
+  els.importanceInput.value = "medium";
+  els.difficultyInput.value = "medium";
+  els.starredInput.checked = false;
+  els.scheduleModeInput.value = "curve";
+  els.curveStageInput.value = "0";
+  els.nextReviewDateInput.value = getScheduleDateByStage(0);
+  els.reminderTimeInput.value = appState.settings.defaultReminderTime || "09:00";
+  els.notesInput.value = "";
+  clearRichEditor(els.questionEditor);
+  clearRichEditor(els.answerEditor);
+
+  if (editId) {
+    const note = appState.notes.find(n => n.id === editId);
+    if (!note) return;
+
+    els.noteId.value = note.id;
+    els.modalTitle.textContent = "編輯卡片";
+    els.deleteNoteBtn.classList.remove("hidden");
+
+    els.deckInput.value = note.deckId;
+    els.importanceInput.value = note.importance;
+    els.difficultyInput.value = note.difficulty;
+    els.starredInput.checked = note.starred;
+    els.scheduleModeInput.value = note.scheduleMode || "curve";
+    els.curveStageInput.value = String(note.reviewStage || 0);
+    els.nextReviewDateInput.value = note.nextReviewDate || getScheduleDateByStage(0);
+    els.reminderTimeInput.value = note.reminderTime || appState.settings.defaultReminderTime || "09:00";
+    els.notesInput.value = note.notes || "";
+
+    setEditorHtml(els.questionEditor, note.questionHtml || "");
+    setEditorHtml(els.answerEditor, note.answerHtml || "");
+
+    modalExistingImages = [...(note.images || [])];
+    modalExistingFiles = [...(note.files || [])];
+    renderModalAttachmentPreview();
+  }
+
+  syncScheduleInputs();
+  els.noteModal.classList.remove("hidden");
+}
+
+function closeModal() {
+  els.noteModal.classList.add("hidden");
+}
+
+async function saveNoteFromModal(event) {
+  event.preventDefault();
+
+  const questionHtml = getEditorHtml(els.questionEditor);
+  const answerHtml = getEditorHtml(els.answerEditor);
+  const question = stripHtml(questionHtml);
+  const answer = stripHtml(answerHtml);
+
+  if (!question.trim() && !questionHtml.includes("data-file-id")) {
+    showToast("請輸入問題", "文字或圖片至少要有一個。", "error");
+    return;
+  }
+
+  const id = els.noteId.value || uid("note");
+  const existing = appState.notes.find(n => n.id === id);
+
+  const savedDraftImages = [];
+  for (const file of modalDraftImages) {
+    savedDraftImages.push(await saveBlobToDb(file));
+  }
+
+  const savedDraftFiles = [];
+  for (const file of modalDraftFiles) {
+    savedDraftFiles.push(await saveBlobToDb(file));
+  }
+
+  const stage = Number(els.curveStageInput.value || 0);
+  const scheduleMode = els.scheduleModeInput.value;
+  const nextReviewDate = scheduleMode === "curve"
+    ? getScheduleDateByStage(stage)
+    : (els.nextReviewDateInput.value || getScheduleDateByStage(stage));
+
+  const deck = getDeck(els.deckInput.value);
+
+  const rawNote = {
+    id,
+    deckId: deck.id,
+    subject: deck.name,
+    question,
+    answer,
+    questionHtml,
+    answerHtml,
+    starred: els.starredInput.checked,
+    importance: els.importanceInput.value,
+    difficulty: els.difficultyInput.value,
+    scheduleMode,
+    nextReviewDate,
+    reminderTime: els.reminderTimeInput.value || appState.settings.defaultReminderTime || "09:00",
+    notes: els.notesInput.value.trim(),
+    images: [...modalExistingImages, ...savedDraftImages],
+    files: [...modalExistingFiles, ...savedDraftFiles],
+	missedPoints: existing?.missedPoints || [],
+    createdAt: existing?.createdAt || todayStr(),
+    updatedAt: todayStr(),
+    reviewStage: stage,
+    reviewHistory: existing?.reviewHistory || [],
+    lastCompletedDate: existing?.lastCompletedDate || "",
+    remindedAt: existing?.remindedAt || "",
+    mastered: existing?.mastered || false,
+    lastReviewResult: existing?.lastReviewResult || "",
+    wrongCount: existing?.wrongCount || 0,
+    lapseCount: existing?.lapseCount || 0,
+    correctCount: existing?.correctCount || 0,
+    reviewCount: existing?.reviewCount || 0
+  };
+
+  const note = normalizeNote(rawNote, appState.decks, new Map(appState.decks.map(d => [d.name, d.id])));
+
+  if (existing) {
+    const idx = appState.notes.findIndex(n => n.id === id);
+    appState.notes[idx] = note;
+  } else {
+    appState.notes.unshift(note);
+  }
+
+  closeModal();
+  requestSave("卡片已儲存");
+  playSound("save");
+  showToast("卡片已儲存", getPlainPreviewFromHtml(note.questionHtml, 18), "success");
+  await renderAll();
+}
+
+/* ---------- deck modal ---------- */
+
+function openDeckModal(deckId = "") {
+  const deck = appState.decks.find(d => d.id === deckId);
+
+  els.deckIdInput.value = deck ? deck.id : "";
+  els.deckModalTitle.textContent = deck ? "編輯 Deck" : "新增 Deck";
+  els.deckNameInput.value = deck ? deck.name : "";
+  els.deckColorInput.value = deck ? deck.color : "#dcecff";
+
+  els.deckModal.classList.remove("hidden");
+}
+
+function closeDeckModal() {
+  els.deckModal.classList.add("hidden");
+}
+
+function saveDeckFromModal(event) {
+  event.preventDefault();
+
+  const id = els.deckIdInput.value;
+  const name = els.deckNameInput.value.trim();
+  const color = els.deckColorInput.value;
+
+  if (!name) {
+    showToast("請輸入 Deck 名稱", "", "error");
+    return;
+  }
+
+  if (id) {
+    const deck = appState.decks.find(d => d.id === id);
+    if (deck) {
+      deck.name = name;
+      deck.color = color;
+      appState.notes.forEach(note => {
+        if (note.deckId === id) note.subject = name;
+      });
+    }
+  } else {
+    appState.decks.push({
+      id: uid("deck"),
+      name,
+      color,
+      protected: false,
+      createdAt: Date.now()
+    });
+  }
+
+  closeDeckModal();
+  requestSave("Deck 已儲存");
+  playSound("save");
+  renderAll();
+}
+
+function deleteDeck(deckId) {
+  const deck = appState.decks.find(d => d.id === deckId);
+  if (!deck) return;
+
+  if (deck.protected || deck.id === "uncategorized") {
+    showToast("這個 Deck 不能刪除", "Uncategorized 是保護 Deck。", "error");
+    return;
+  }
+
+  const ok = window.confirm(`確定要刪除 Deck「${deck.name}」嗎？\n卡片不會刪除，會移到 Uncategorized。`);
+  if (!ok) return;
+
+  appState.notes.forEach(note => {
+    if (note.deckId === deckId) {
+      note.deckId = "uncategorized";
+      note.subject = "Uncategorized";
+    }
+  });
+
+  appState.decks = appState.decks.filter(d => d.id !== deckId);
+
+  if (currentDeckWall === deckId) currentDeckWall = "";
+  if (els.filterDeck.value === deckId) els.filterDeck.value = "";
+
+  requestSave("Deck 已刪除");
+  showToast("Deck 已刪除", "卡片已移到 Uncategorized。", "warn");
+  renderAll();
+}
+
+/* ---------- note operations ---------- */
+
+function toggleStar(id) {
+  const note = appState.notes.find(n => n.id === id);
+  if (!note) return;
+
+  note.starred = !note.starred;
+  note.updatedAt = todayStr();
+
+  requestSave("星號已更新");
+  renderAll();
+}
+
+function updateCurveStage(id, stageValue) {
+  const note = appState.notes.find(n => n.id === id);
+  if (!note) return;
+
+  note.reviewStage = clamp(Number(stageValue), 0, CURVE_DAYS.length - 1);
+  note.scheduleMode = "curve";
+  note.nextReviewDate = getScheduleDateByStage(note.reviewStage);
+  note.updatedAt = todayStr();
+  note.reviewHistory.push({
+    date: todayStr(),
+    action: "manual-stage",
+    reviewStage: note.reviewStage,
+    nextReviewDate: note.nextReviewDate
+  });
+
+  requestSave("曲線階段已更新");
+  showToast("已更新曲線階段", getCurveStageLabel(note.reviewStage), "success");
+  renderAll();
+}
+
+function deleteNote(id) {
+  const note = appState.notes.find(n => n.id === id);
+  if (!note) return;
+
+  const ok = window.confirm(`確定要刪除這張卡片嗎？\n\n${getPlainPreviewFromHtml(note.questionHtml, 40)}`);
+  if (!ok) return;
+
+  appState.notes = appState.notes.filter(n => n.id !== id);
+  requestSave("卡片已刪除");
+  closeModal();
+  showToast("卡片已刪除", "", "warn");
+  renderAll();
+}
+
+function openEditModal(id) {
+  openModal(id);
+}
+
+function openDeckWall(deckId) {
+  currentDeckWall = deckId;
+  els.filterDeck.value = deckId;
+  switchView("notes");
+  renderNotes();
+}
+
+function clearDeckWall() {
+  currentDeckWall = "";
+  els.filterDeck.value = "";
+  switchView("notes");
+  renderNotes();
+}
+
+function selectCalendarDate(dateStr, month, year) {
+  selectedCalendarDate = dateStr;
+  currentCalendarDate = new Date(year, month, 1);
+  renderCalendar();
+}
+
+function toggleReviewFlip(id, event) {
+  if (event?.target?.closest("img, a, button")) return;
+
+  const note = appState.notes.find(n => n.id === id);
+  if (!note) return;
+
+  note._flipped = !note._flipped;
+  renderReviewList();
+}
+
+/* ---------- review logic ---------- */
+
+function updateStudyProgress() {
+  const today = todayStr();
+  const yesterday = addDays(today, -1);
+
+  if (appState.progress.lastStudyDate !== today) {
+    if (appState.progress.lastStudyDate === yesterday) {
+      appState.progress.streakDays = (appState.progress.streakDays || 0) + 1;
+    } else {
+      appState.progress.streakDays = 1;
+    }
+
+    appState.progress.lastStudyDate = today;
+  }
+
+  appState.progress.reviewDates[today] = (appState.progress.reviewDates[today] || 0) + 1;
+  appState.progress.creamPoints = (appState.progress.creamPoints || 0) + 1;
+
+  const goal = Math.max(3, Number(appState.settings.cakeGoal || 30));
+  appState.progress.cakesCompleted = Math.floor(appState.progress.creamPoints / goal);
+}
+
+function applyReviewResultToNote(note, action, options = {}) {
+  const today = todayStr();
+  note.reviewHistory ||= [];
+
+  const oldStage = note.reviewStage;
+
+  if (action === "mastered") {
+    note.mastered = true;
+    note.lastReviewResult = "mastered";
+    note.lastCompletedDate = today;
+    note.reviewStage = CURVE_DAYS.length - 1;
+    note.nextReviewDate = addDays(today, CURVE_DAYS[CURVE_DAYS.length - 1]);
+    note.correctCount = (note.correctCount || 0) + 1;
+  } else if (action === "custom") {
+    note.mastered = false;
+    note.lastReviewResult = "custom";
+    note.lastCompletedDate = today;
+    note.nextReviewDate = options.customDate || note.nextReviewDate;
+  } else {
+    note.mastered = false;
+    note.lastReviewResult = action;
+    note.lastCompletedDate = today;
+
+    if (action === "remembered") {
+      note.reviewStage = Math.min(note.reviewStage + 1, CURVE_DAYS.length - 1);
+      note.nextReviewDate = getScheduleDateByStage(note.reviewStage, today);
+      note.correctCount = (note.correctCount || 0) + 1;
+    } else if (action === "okay") {
+      note.reviewStage = Math.min(note.reviewStage + 1, CURVE_DAYS.length - 1);
+      const days = Math.max(1, Math.ceil(CURVE_DAYS[note.reviewStage] / 2));
+      note.nextReviewDate = addDays(today, days);
+    } else if (action === "forgot") {
+      note.reviewStage = Math.max(note.reviewStage - 1, 0);
+      note.nextReviewDate = addDays(today, 1);
+      note.wrongCount = (note.wrongCount || 0) + 1;
+      note.lapseCount = (note.lapseCount || 0) + 1;
+    }
+  }
+
+  note.reviewCount = (note.reviewCount || 0) + 1;
+  note.updatedAt = today;
+
+  note.reviewHistory.push({
+    date: today,
+    action,
+    oldStage,
+    reviewStage: note.reviewStage,
+    nextReviewDate: note.nextReviewDate
+  });
+
+  updateStudyProgress();
+}
+
+function handleReview(id, action) {
+  const note = appState.notes.find(n => n.id === id);
+  if (!note) return;
+
+  applyReviewResultToNote(note, action);
+  requestSave("複習紀錄已儲存");
+  playSound(action === "forgot" ? "forgot" : "remembered");
+  showToast("複習紀錄已更新", getPlainPreviewFromHtml(note.questionHtml, 18), "success");
+  renderAll();
+}
+
+function markMastered(id) {
+  const note = appState.notes.find(n => n.id === id);
+  if (!note) return;
+
+  applyReviewResultToNote(note, "mastered");
+  requestSave("已標記為熟記");
+  playSound("mastered");
+  showToast("已標記為熟記", getPlainPreviewFromHtml(note.questionHtml, 18), "success");
+  renderAll();
+}
+
+function openCustomReviewModal(id) {
+  const note = appState.notes.find(n => n.id === id);
+  if (!note) return;
+
+  els.customReviewNoteId.value = id;
+  els.customReviewDate.value = note.nextReviewDate || todayStr();
+  els.customReminderModal.classList.remove("hidden");
+}
+
+function closeCustomReviewModal() {
+  els.customReminderModal.classList.add("hidden");
+}
+
+function saveCustomReview() {
+  const id = els.customReviewNoteId.value;
+  const date = els.customReviewDate.value;
+  if (!id || !date) return;
+
+  const note = appState.notes.find(n => n.id === id);
+  if (!note) return;
+
+  applyReviewResultToNote(note, "custom", { customDate: date });
+  requestSave("複習日期已更新");
+  closeCustomReviewModal();
+  showToast("複習日期已更新", formatDisplayDate(date), "success");
+  renderAll();
+}
+
+/* ---------- reminders ---------- */
+
+function maybeNotify(note) {
+  const key = `${note.id}_${todayStr()}_${note.reminderTime}`;
+  if (remindedMap[key]) return;
+
+  showToast("奶油記憶提醒", `${getPlainPreviewFromHtml(note.questionHtml, 16)} · 該複習囉`, "info");
+
+  if (appState.settings.notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    new Notification("奶油記憶提醒", {
+      body: `${getPlainPreviewFromHtml(note.questionHtml, 16)} · 該複習囉`
+    });
+  }
+
+  playSound("notify");
+  remindedMap[key] = true;
+}
+
+function reminderLoop() {
+  const now = new Date();
+  const nowDate = todayStr();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  const currentTime = `${hh}:${mm}`;
+
+  appState.notes.forEach(note => {
+    if (note.nextReviewDate <= nowDate && note.lastCompletedDate !== nowDate && !note.mastered) {
+      if ((note.reminderTime || appState.settings.defaultReminderTime) === currentTime) {
+        maybeNotify(note);
+      }
+    }
+  });
+}
+
+function requestNotificationPermission() {
+  if (!("Notification" in window)) {
+    showToast("瀏覽器通知未支援", "", "error");
+    return;
+  }
+
+  Notification.requestPermission().then(permission => {
+    appState.settings.notificationsEnabled = permission === "granted";
+    requestSave("通知設定已更新");
+    showToast(permission === "granted" ? "通知已啟用" : "瀏覽器通知未允許", "", permission === "granted" ? "success" : "warn");
+  });
+}
+
+/* ---------- study preference ---------- */
+
+function openStudyPreference(source) {
+  pendingStudySource = source;
+
+  let label = "今日待複習";
+  if (source.type === "deck") label = `${getDeckName(source.deckId)} Deck`;
+  if (source.type === "single") {
+    const note = appState.notes.find(n => n.id === source.noteId);
+    label = note ? getPlainPreviewFromHtml(note.questionHtml, 24) : "單一卡片";
+  }
+
+  els.studySourceLabel.value = label;
+  els.studyOrderInput.value = "due-first";
+  els.studyViewModeInput.value = "flip";
+  els.studyFilterInput.value = source.type === "single" ? "all" : "unmastered";
+  els.studyIncludeDoneInput.value = "no";
+
+  els.studyPreferenceModal.classList.remove("hidden");
+}
+
+function closeStudyPreference() {
+  els.studyPreferenceModal.classList.add("hidden");
+}
+
+function buildStudyQueue(source, prefs) {
+  const today = todayStr();
+  let notes = [...appState.notes];
+  notes = notes.filter(isValidStudyQueueNote);
+  if (source.type === "today") {
+    notes = notes.filter(note => note.nextReviewDate <= today);
+    if (prefs.includeDone !== "yes") {
+      notes = notes.filter(note => note.lastCompletedDate !== today);
+    }
+  }
+
+  if (source.type === "deck") {
+    notes = notes.filter(note => note.deckId === source.deckId);
+    if (prefs.includeDone !== "yes") {
+      notes = notes.filter(note => !(note.lastCompletedDate === today && note.nextReviewDate <= today));
+    }
+  }
+
+  if (source.type === "single") {
+    notes = notes.filter(note => note.id === source.noteId);
+  }
+
+  if (prefs.filter === "due") notes = notes.filter(note => getStudyState(note) === "due" || getStudyState(note) === "wrong");
+  if (prefs.filter === "starred") notes = notes.filter(note => note.starred);
+  if (prefs.filter === "high") notes = notes.filter(note => note.importance === "high");
+  if (prefs.filter === "wrong") notes = notes.filter(note => note.wrongCount > 0);
+  if (prefs.filter === "unmastered") notes = notes.filter(note => !note.mastered);
+
+  if (prefs.order === "due-first") {
+    notes.sort((a, b) => {
+      const aDue = a.nextReviewDate <= today ? 0 : 1;
+      const bDue = b.nextReviewDate <= today ? 0 : 1;
+      if (aDue !== bDue) return aDue - bDue;
+      return a.nextReviewDate.localeCompare(b.nextReviewDate);
+    });
+  } else if (prefs.order === "old-first") {
+    notes.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  } else if (prefs.order === "new-first") {
+    notes.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } else if (prefs.order === "stars-first") {
+    notes.sort((a, b) => Number(b.starred) - Number(a.starred) || a.nextReviewDate.localeCompare(b.nextReviewDate));
+  } else if (prefs.order === "random") {
+    notes = shuffleArray(notes);
+  }
+
+  return notes;
+}
+
+function isValidStudyQueueNote(note) {
+  if (!note) return false;
+
+  const q = stripHtml(note.questionHtml || note.question || "").trim();
+  const a = stripHtml(note.answerHtml || note.answer || "").trim();
+
+  /*
+    沒有問題內容的卡不要進入學習 queue。
+    但答案可以空，因為有些人會用 Q-only 卡。
+  */
+  if (!q) return false;
+
+  /*
+    修正疑似錯誤產生的幽靈卡。
+    如果這張卡只有「量宮高技巧」且答案完全空白，視為無效 queue card。
+  */
+  const normalizedQ = q.replace(/\s+/g, "");
+  const normalizedA = a.replace(/\s+/g, "");
+
+  const ghostTitles = [
+    "量宮高技巧",
+    "量高宫技巧",
+    "量高宮技巧",
+    "量宮高宫技巧"
+  ].map(x => x.replace(/\s+/g, ""));
+
+  if (ghostTitles.includes(normalizedQ) && !normalizedA) {
+    return false;
+  }
+
+  return true;
+}
+
+function startStudyMode() {
+  if (!pendingStudySource) return;
+
+  const prefs = {
+    order: els.studyOrderInput.value,
+    viewMode: els.studyViewModeInput.value,
+    filter: els.studyFilterInput.value,
+    includeDone: els.studyIncludeDoneInput.value
+  };
+
+  const queue = buildStudyQueue(pendingStudySource, prefs);
+
+  if (!queue.length) {
+    closeStudyPreference();
+    showToast("沒有可複習的卡片", "", "warn");
+    return;
+  }
+
+  studyState = {
+    active: true,
+    sourceType: pendingStudySource.type,
+    sourceLabel: els.studySourceLabel.value,
+    notes: queue,
+    index: 0,
+    total: queue.length,
+    answerVisible: false,
+    stats: {
+      remembered: 0,
+      okay: 0,
+      forgot: 0,
+      mastered: 0,
+      later: 0
+    },
+    preferences: prefs
+  };
+
+  studyInlineEditing = false;
+  studyEditingTarget = "answer";
+  studyEditDraft = { questionHtml: "", answerHtml: "" };
+
+  closeStudyPreference();
+  els.studyModeView.classList.remove("hidden");
+  document.body.classList.add("study-open");
+
+  const ratio = clamp(appState.settings.splitRatio || 50, 28, 72);
+  els.studyCardSplit.style.setProperty("--split-left", `${ratio}%`);
+
+  renderStudyMode();
+}
+
+/* ---------- study mode ---------- */
+
+function getCurrentStudyNote() {
+  return studyState.notes[studyState.index] || null;
+}
+
+function updateStudyCardFlipState() {
+  if (!els.studyCardInner) return;
+  els.studyCardInner.classList.toggle("flipped", !!studyState.answerVisible);
+}
+
+function updateStudyFlipButtonLabel() {
+  if (studyState.preferences.viewMode === "flip") {
+    els.studyFlipBtn.textContent = studyState.answerVisible ? "回問題" : "翻面";
+  } else {
+    els.studyFlipBtn.textContent = studyState.answerVisible ? "隱藏答案" : "顯示答案";
+  }
+}
+
+function clearStudyEditableClasses() {
+  [els.studyQuestion, els.studyAnswer, els.studyQuestionSplit, els.studyAnswerSplit].forEach(el => {
+    if (!el) return;
+    el.contentEditable = "false";
+    el.classList.remove("study-editing", "study-question-editing", "study-answer-editing");
+  });
+}
+
+function getStudyEditableTargets() {
+  if (studyState.preferences.viewMode === "flip") {
+    return {
+      question: els.studyQuestion,
+      answer: els.studyAnswer
+    };
+  }
+
+  return {
+    question: els.studyQuestionSplit,
+    answer: els.studyAnswerSplit
+  };
+}
+
+function updateStudyEditTabs() {
+  els.studyEditQuestionTab.classList.toggle("active", studyEditingTarget === "question");
+  els.studyEditAnswerTab.classList.toggle("active", studyEditingTarget === "answer");
+}
+
+function updateStudySplitAnswerVisibility() {
+  const revealed = !!studyState.answerVisible;
+
+  els.studySplitAnswerPanel.classList.toggle("answer-hidden", !revealed);
+  els.studySplitAnswerCover.classList.toggle("hidden", revealed);
+
+  els.studyAnswerSplit.style.filter = revealed ? "none" : "blur(10px)";
+  els.studyAnswerSplit.style.opacity = revealed ? "1" : "0.08";
+  els.studyAnswerSplit.style.pointerEvents = revealed ? "auto" : "none";
+  els.studyAnswerSplit.style.userSelect = revealed ? "auto" : "none";
+}
+
+function applyStudyEditingTarget() {
+  if (!studyInlineEditing) return;
+
+  const currentTargets = getStudyEditableTargets();
+
+  if (currentTargets?.question && currentTargets?.answer) {
+    studyEditDraft.questionHtml = sanitizeRichHtml(currentTargets.question.innerHTML || "");
+    studyEditDraft.answerHtml = sanitizeRichHtml(currentTargets.answer.innerHTML || "");
+  }
+
+  clearStudyEditableClasses();
+  updateStudyEditTabs();
+
+  const targets = getStudyEditableTargets();
+  const target = targets[studyEditingTarget];
+  if (!target) return;
+
+  if (studyState.preferences.viewMode === "flip") {
+    studyState.answerVisible = studyEditingTarget === "answer";
+    updateStudyCardFlipState();
+  } else {
+    if (studyEditingTarget === "answer") studyState.answerVisible = true;
+    updateStudySplitAnswerVisibility();
+  }
+
+  target.contentEditable = "true";
+  target.classList.add("study-editing");
+  target.classList.add(studyEditingTarget === "question" ? "study-question-editing" : "study-answer-editing");
+  target.focus();
+  activeEditorId = target.id;
+  updateStudyFlipButtonLabel();
+}
+
+async function renderStudyMode() {
+  if (!studyState.active) return;
+
+  const note = getCurrentStudyNote();
+
+  if (!note) {
+    renderStudyComplete();
+    return;
+  }
+
+  els.studyStage.classList.remove("hidden");
+  els.studyCompleteState.classList.add("hidden");
+
+  els.studyModeTitle.textContent = "學習模式";
+  els.studyModeSubtitle.textContent = studyState.sourceLabel;
+
+  const doneCount =
+    studyState.stats.remembered +
+    studyState.stats.okay +
+    studyState.stats.forgot +
+    studyState.stats.mastered;
+
+  const currentPosition = Math.min(doneCount + 1, studyState.total);
+  els.studyProgressText.textContent = `${currentPosition} / ${studyState.total}`;
+  els.studyRemainingText.textContent = `剩餘 ${studyState.notes.length - 1} 張`;
+  els.studyProgressFill.style.width = `${(doneCount / Math.max(studyState.total, 1)) * 100}%`;
+
+  els.studyDeckBadge.textContent = getDeckName(note.deckId);
+  els.studyCurveBadge.textContent = getCurveStageLabel(note.reviewStage);
+  els.studyStateBadge.textContent = getStudyStateLabel(note);
+
+  const questionHtml = studyInlineEditing ? (studyEditDraft.questionHtml || "") : (note.questionHtml || "");
+  const answerHtml = studyInlineEditing ? (studyEditDraft.answerHtml || "") : (note.answerHtml || "");
+
+  els.studyQuestion.innerHTML = questionHtml;
+  els.studyAnswer.innerHTML = answerHtml;
+  els.studyQuestionSplit.innerHTML = questionHtml;
+  els.studyAnswerSplit.innerHTML = answerHtml;
+
+  const isFlip = studyState.preferences.viewMode === "flip";
+
+  els.studyCardFlip.classList.toggle("hidden", !isFlip);
+  els.studyCardSplit.classList.toggle("hidden", isFlip);
+
+  if (isFlip) {
+    updateStudyCardFlipState();
+    els.studySplitAnswerPanel.classList.remove("answer-hidden");
+    els.studySplitAnswerCover.classList.add("hidden");
+  } else {
+    els.studyCardInner.classList.remove("flipped");
+    updateStudySplitAnswerVisibility();
+  }
+
+  updateStudyFlipButtonLabel();
+
+  await hydrateRichContentImages(els.studyQuestion);
+  await hydrateRichContentImages(els.studyAnswer);
+  await hydrateRichContentImages(els.studyQuestionSplit);
+  await hydrateRichContentImages(els.studyAnswerSplit);
+
+  if (!studyInlineEditing) {
+    [els.studyQuestion, els.studyAnswer, els.studyQuestionSplit, els.studyAnswerSplit].forEach(el => {
+      if (el) el.scrollTop = 0;
+    });
+  }
+
+  if (studyInlineEditing) {
+    applyStudyEditingTarget();
+  } else {
+    clearStudyEditableClasses();
+    updateStudyEditTabs();
+  }
+}
+
+function toggleStudyReveal() {
+  if (studyInlineEditing) {
+    showToast("請先儲存或取消編輯", "", "warn");
+    return;
+  }
+
+  studyState.answerVisible = !studyState.answerVisible;
+
+  if (studyState.preferences.viewMode === "flip") {
+    updateStudyCardFlipState();
+  } else {
+    updateStudySplitAnswerVisibility();
+  }
+
+  updateStudyFlipButtonLabel();
+}
+
+function toggleStudyLayout() {
+  if (studyInlineEditing) {
+    showToast("請先儲存或取消編輯", "", "warn");
+    return;
+  }
+
+  studyState.preferences.viewMode = studyState.preferences.viewMode === "flip" ? "split" : "flip";
+  studyState.answerVisible = false;
+  renderStudyMode();
+}
+
+function studyPrev() {
+  if (studyInlineEditing) {
+    showToast("請先儲存或取消編輯", "", "warn");
+    return;
+  }
+
+  if (studyState.index > 0) {
+    studyState.index -= 1;
+    studyState.answerVisible = false;
+    renderStudyMode();
+  }
+}
+
+function studyNext() {
+  if (studyInlineEditing) {
+    showToast("請先儲存或取消編輯", "", "warn");
+    return;
+  }
+
+  if (studyState.index < studyState.notes.length - 1) {
+    studyState.index += 1;
+    studyState.answerVisible = false;
+    renderStudyMode();
+  }
+}
+
+function enableStudyInlineEdit() {
+  const note = getCurrentStudyNote();
+  if (!note) return;
+
+  studyInlineEditing = true;
+  studyEditingTarget = "answer";
+  studyInlineOriginalQuestionHtml = note.questionHtml || "";
+  studyInlineOriginalAnswerHtml = note.answerHtml || "";
+
+  studyEditDraft = {
+    questionHtml: note.questionHtml || "",
+    answerHtml: note.answerHtml || ""
+  };
+
+  studyState.answerVisible = true;
+  els.studyInlineEditBar.classList.remove("hidden");
+  renderStudyMode();
+}
+
+function switchStudyInlineTarget(target) {
+  studyEditingTarget = target;
+  if (!studyInlineEditing) return;
+  applyStudyEditingTarget();
+}
+
+function disableStudyInlineEdit() {
+  studyInlineEditing = false;
+  els.studyInlineEditBar.classList.add("hidden");
+  clearStudyEditableClasses();
+  studyEditingTarget = "answer";
+  updateStudyEditTabs();
+}
+
+function saveStudyInlineEdit() {
+  const note = getCurrentStudyNote();
+  if (!note) return;
+
+  const targets = getStudyEditableTargets();
+
+  studyEditDraft.questionHtml = sanitizeRichHtml(targets.question.innerHTML || "");
+  studyEditDraft.answerHtml = sanitizeRichHtml(targets.answer.innerHTML || "");
+
+  note.questionHtml = studyEditDraft.questionHtml;
+  note.answerHtml = studyEditDraft.answerHtml;
+  note.question = stripHtml(note.questionHtml);
+  note.answer = stripHtml(note.answerHtml);
+  note.updatedAt = todayStr();
+
+  requestSave("卡片內容已更新");
+  disableStudyInlineEdit();
+  playSound("save");
+  showToast("卡片內容已更新", "", "success");
+  renderStudyMode();
+}
+
+function cancelStudyInlineEdit() {
+  studyEditDraft = {
+    questionHtml: studyInlineOriginalQuestionHtml,
+    answerHtml: studyInlineOriginalAnswerHtml
+  };
+
+  disableStudyInlineEdit();
+  renderStudyMode();
+}
+
+function renderStudyComplete() {
+  els.studyStage.classList.add("hidden");
+  els.studyCompleteState.classList.remove("hidden");
+  els.studyProgressFill.style.width = "100%";
+
+  els.studySummaryStats.innerHTML = `
+    <div class="complete-stat"><strong>${studyState.stats.remembered}</strong><span>記住了</span></div>
+    <div class="complete-stat"><strong>${studyState.stats.okay}</strong><span>普通</span></div>
+    <div class="complete-stat"><strong>${studyState.stats.forgot}</strong><span>忘了</span></div>
+    <div class="complete-stat"><strong>${studyState.stats.mastered}</strong><span>已熟記</span></div>
+    <div class="complete-stat"><strong>${studyState.stats.later}</strong><span>稍後再看</span></div>
+  `;
+
+  playSound("complete");
+}
+
+function applyStudyAction(action) {
+  const note = getCurrentStudyNote();
+  if (!note) return;
+
+  if (studyInlineEditing) {
+    showToast("請先儲存或取消編輯", "", "warn");
+    return;
+  }
+
+  if (action === "later") {
+    studyState.stats.later += 1;
+
+    if (studyState.notes.length > 1) {
+      const moved = studyState.notes.splice(studyState.index, 1)[0];
+      studyState.notes.push(moved);
+      if (studyState.index >= studyState.notes.length) studyState.index = 0;
+    }
+
+    studyState.answerVisible = false;
+    showToast("已移到稍後再看", "", "info");
+    renderStudyMode();
+    return;
+  }
+
+  applyReviewResultToNote(note, action);
+  requestSave("複習進度已儲存");
+
+  if (action === "remembered") studyState.stats.remembered += 1;
+  if (action === "okay") studyState.stats.okay += 1;
+  if (action === "forgot") studyState.stats.forgot += 1;
+  if (action === "mastered") studyState.stats.mastered += 1;
+
+  if (action === "forgot") playSound("forgot");
+  else if (action === "mastered") playSound("mastered");
+  else playSound("remembered");
+
+  studyState.notes.splice(studyState.index, 1);
+
+  if (!studyState.notes.length) {
+    renderStudyComplete();
+    return;
+  }
+
+  if (studyState.index >= studyState.notes.length) {
+    studyState.index = studyState.notes.length - 1;
+  }
+
+  studyState.answerVisible = false;
+  renderStudyMode();
+}
+
+function closeStudyMode() {
+  studyState.active = false;
+  studyInlineEditing = false;
+  studyState.answerVisible = false;
+  els.studyModeView.classList.add("hidden");
+  els.studyInlineEditBar.classList.add("hidden");
+  els.studyStage.classList.remove("hidden");
+  els.studyCompleteState.classList.add("hidden");
+  document.body.classList.remove("study-open");
+  renderAll();
+}
+
+/* ---------- split resizer ---------- */
+
+function beginSplitResize(event) {
+  if (studyState.preferences.viewMode !== "split") return;
+  if (window.innerWidth <= 840) return;
+  splitResizeActive = true;
+  event.preventDefault();
+}
+
+function onSplitResize(event) {
+  if (!splitResizeActive) return;
+
+  const rect = els.studyCardSplit.getBoundingClientRect();
+  if (!rect.width) return;
+
+  let clientX = event.clientX;
+  if (event.touches && event.touches[0]) clientX = event.touches[0].clientX;
+
+  let percent = ((clientX - rect.left) / rect.width) * 100;
+  percent = Math.max(28, Math.min(72, percent));
+
+  els.studyCardSplit.style.setProperty("--split-left", `${percent}%`);
+  appState.settings.splitRatio = percent;
+}
+
+function endSplitResize() {
+  if (!splitResizeActive) return;
+  splitResizeActive = false;
+  requestSave("左右比例已儲存");
+}
+
+/* ---------- backup ---------- */
+
+async function exportBackup() {
+  try {
+    showToast("開始匯出", "正在整理完整備份...", "info");
+
+    const records = await fileGetAll();
+    const dbFiles = [];
+
+    for (const record of records) {
+      const dataUrl = await blobToDataUrl(record.blob);
+      dbFiles.push({
+        id: record.id,
+        name: record.name,
+        type: record.type,
+        createdAt: record.createdAt,
+        dataUrl
+      });
+    }
+
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      version: "creamy-recall-v20",
+      appState,
+      dbFiles
+    };
+
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+
+    a.href = url;
+    a.download = `creamy-recall-full-backup-${todayStr()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    showToast("完整備份已匯出", "", "success");
+  } catch (error) {
+    console.error(error);
+    showToast("匯出失敗", "請稍後再試。", "error");
+  }
+}
+
+function mergeNotes(existingNotes, incomingNotes) {
+  const map = new Map(existingNotes.map(note => [note.id, note]));
+  incomingNotes.forEach(raw => {
+    const note = normalizeNote(raw, appState.decks, new Map(appState.decks.map(d => [d.name, d.id])));
+    map.set(note.id, note);
+  });
+  return [...map.values()];
+}
+
+function mergeDecks(existingDecks, incomingDecks) {
+  const map = new Map(existingDecks.map(deck => [deck.id, deck]));
+  incomingDecks.forEach(deck => {
+    if (!map.has(deck.id)) map.set(deck.id, deck);
+  });
+  return [...map.values()];
+}
+
+async function restoreDbFiles(dbFiles, replaceAll = false) {
+  if (replaceAll) {
+    revokeAllObjectUrls();
+    await fileClear();
+  }
+
+  for (const file of dbFiles || []) {
+    const blob = dataUrlToBlob(file.dataUrl);
+    const restoredFile = new File([blob], file.name || "file", {
+      type: file.type || blob.type || "application/octet-stream"
+    });
+    await saveBlobToDb(restoredFile, file.id);
+  }
+}
+
+function importBackupFile(file) {
+  if (!file) return;
+
+  const reader = new FileReader();
+
+  reader.onload = async () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      const incoming = parsed.appState || parsed;
+
+      if (!incoming || !Array.isArray(incoming.notes)) {
+        throw new Error("invalid backup");
+      }
+
+      if (importMode === "replace") {
+        await restoreDbFiles(parsed.dbFiles || [], true);
+        appState = normalizeAppState(incoming);
+        await saveStateNow(appState, "匯入資料已儲存");
+        showToast("已覆蓋匯入完整備份", "", "success");
+      } else {
+        await restoreDbFiles(parsed.dbFiles || [], false);
+
+        const normalizedIncoming = normalizeAppState(incoming);
+        appState.decks = mergeDecks(appState.decks, normalizedIncoming.decks);
+        appState.notes = mergeNotes(appState.notes, normalizedIncoming.notes);
+        appState.settings = { ...appState.settings, ...normalizedIncoming.settings };
+
+        await saveStateNow(appState, "合併匯入已儲存");
+        showToast("已合併匯入完整備份", "", "success");
+      }
+
+      applyTheme(appState.settings.theme || "cream");
+      await renderAll();
+    } catch (error) {
+      console.error(error);
+      showToast("匯入失敗", "JSON 格式不正確或備份不完整。", "error");
+    } finally {
+      els.importBackupInput.value = "";
+    }
+  };
+
+  reader.readAsText(file);
+}
+
+async function resetAllData() {
+  const ok = window.confirm("確定要清空所有資料嗎？建議先匯出完整備份。\n\n這會刪除卡片、Deck、複習紀錄與附件。");
+  if (!ok) return;
+
+  revokeAllObjectUrls();
+  await fileClear();
+
+  appState = defaultState();
+  await saveStateNow(appState, "資料已重置");
+  applyTheme(appState.settings.theme || "cream");
+  await renderAll();
+
+  showToast("資料已清空", "", "warn");
+}
+
+/* ---------- lightbox ---------- */
+
+function openLightbox(src) {
+  if (!src) return;
+  els.lightboxImage.src = src;
+  els.lightboxModal.classList.remove("hidden");
+}
+
+function closeLightbox() {
+  els.lightboxModal.classList.add("hidden");
+  els.lightboxImage.src = "";
+}
+
+/* ---------- sound ---------- */
+
+function playSound(type = "save") {
+  if (!appState?.settings?.soundEnabled) return;
+
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContext();
+    const volume = clamp(appState.settings.soundVolume ?? 70, 0, 100) / 100;
+    const master = ctx.createGain();
+
+    master.gain.value = 0.08 * volume;
+    master.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+
+    const playTone = (freq, start, duration, wave = "sine", gainScale = 1) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = wave;
+      osc.frequency.value = freq;
+
+      gain.gain.setValueAtTime(0.0001, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.6 * gainScale, now + start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + start + duration);
+
+      osc.connect(gain);
+      gain.connect(master);
+
+      osc.start(now + start);
+      osc.stop(now + start + duration + 0.02);
+    };
+
+    if (type === "save") {
+      playTone(420, 0, 0.12);
+      playTone(620, 0.08, 0.16);
+    } else if (type === "error") {
+      playTone(190, 0, 0.22, "sawtooth", 0.7);
+      playTone(150, 0.14, 0.18, "sawtooth", 0.6);
+    } else if (type === "forgot") {
+      playTone(260, 0, 0.16, "triangle");
+      playTone(220, 0.12, 0.18, "triangle");
+    } else if (type === "remembered") {
+      playTone(520, 0, 0.09);
+      playTone(720, 0.07, 0.13);
+    } else if (type === "mastered") {
+      playTone(520, 0, 0.12);
+      playTone(660, 0.08, 0.12);
+      playTone(880, 0.16, 0.22);
+    } else if (type === "complete") {
+      playTone(440, 0, 0.12);
+      playTone(660, 0.1, 0.12);
+      playTone(880, 0.2, 0.16);
+      playTone(990, 0.32, 0.22);
+    } else if (type === "notify") {
+      playTone(330, 0, 0.14);
+      playTone(660, 0.16, 0.18);
+    } else if (type === "insert") {
+      playTone(700, 0, 0.08);
+    } else if (type === "theme") {
+      playTone(600, 0, 0.08);
+      playTone(900, 0.06, 0.12);
+    }
+
+    setTimeout(() => ctx.close?.(), 900);
+  } catch {
+    // ignore
+  }
+}
+
+/* ---------- render all ---------- */
+
+async function renderAll() {
+  populateDeckSelects();
+  renderStats();
+  renderSubjectDecks();
+  renderTodayTasks();
+  renderNotes();
+  renderCalendar();
+  await renderReviewList();
+  renderSettings();
+  updateTodayDateText();
+
+  if (studyState.active) await renderStudyMode();
+}
+
+/* ---------- events ---------- */
+
+function bindRichToolbarEvents() {
+  document.querySelectorAll("[data-cmd]").forEach(btn => {
+    btn.addEventListener("click", () => applyEditorCommand(btn.dataset.editor, btn.dataset.cmd));
+  });
+
+  document.querySelectorAll("[data-list]").forEach(btn => {
+    btn.addEventListener("click", () => applyListCommand(btn.dataset.editor, btn.dataset.list));
+  });
+
+  document.querySelectorAll("[data-action]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const editorId = btn.dataset.editor;
+      const action = btn.dataset.action;
+
+      if (action === "undo" || action === "redo") applyUndoRedo(editorId, action);
+      else if (action === "insert-table") {
+        focusEditorById(editorId);
+        openTableInsertModal(editorId);
+      } else if (action === "clear-format") {
+        applyClearFormat(editorId);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-highlight]").forEach(btn => {
+    btn.addEventListener("click", () => applyCustomHighlight(btn.dataset.editor, btn.dataset.highlight));
+  });
+
+  document.querySelectorAll("[data-clear-highlight]").forEach(btn => {
+    btn.addEventListener("click", () => clearCustomHighlight(btn.dataset.editor));
+  });
+
+  document.querySelectorAll("[data-color]").forEach(btn => {
+    btn.addEventListener("click", () => applyTextColor(btn.dataset.editor, btn.dataset.color));
+  });
+
+  document.querySelectorAll("[data-insert-image]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const editorId = btn.dataset.insertImage;
+      activeEditorId = editorId;
+
+      if (editorId === "questionEditor") els.questionInlineImageInput.click();
+      if (editorId === "answerEditor") els.answerInlineImageInput.click();
+    });
+  });
+
+  els.questionInlineImageInput.addEventListener("change", () => insertInlineImageToEditor("questionEditor", els.questionInlineImageInput));
+  els.answerInlineImageInput.addEventListener("change", () => insertInlineImageToEditor("answerEditor", els.answerInlineImageInput));
+}
+
+function bindStudyInlineToolbarEvents() {
+  document.querySelectorAll("[data-study-cmd]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = getStudyEditableTargets()[studyEditingTarget];
+      if (!target) return;
+      activeEditorId = target.id;
+      target.focus();
+      document.execCommand(btn.dataset.studyCmd, false, null);
+    });
+  });
+
+  document.querySelectorAll("[data-study-list]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = getStudyEditableTargets()[studyEditingTarget];
+      if (!target) return;
+      activeEditorId = target.id;
+      target.focus();
+      document.execCommand(btn.dataset.studyList === "ul" ? "insertUnorderedList" : "insertOrderedList", false, null);
+    });
+  });
+
+  document.querySelectorAll("[data-study-highlight]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = getStudyEditableTargets()[studyEditingTarget];
+      if (!target) return;
+      activeEditorId = target.id;
+      target.focus();
+      applyCustomHighlight(target.id, btn.dataset.studyHighlight);
+    });
+  });
+
+  document.querySelectorAll("[data-study-clear-highlight]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = getStudyEditableTargets()[studyEditingTarget];
+      if (!target) return;
+      clearCustomHighlight(target.id);
+    });
+  });
+
+  document.querySelectorAll("[data-study-action]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = getStudyEditableTargets()[studyEditingTarget];
+      if (!target) return;
+
+      if (btn.dataset.studyAction === "insert-table") {
+        openTableInsertModal(target.id);
+      }
+
+      if (btn.dataset.studyAction === "clear-format") {
+        applyClearFormat(target.id);
+      }
+    });
+  });
+
+  els.studyEditQuestionTab.addEventListener("click", () => switchStudyInlineTarget("question"));
+  els.studyEditAnswerTab.addEventListener("click", () => switchStudyInlineTarget("answer"));
+  els.studyInsertImageBtn.addEventListener("click", () => els.studyInlineImageInput.click());
+
+  els.studyInlineImageInput.addEventListener("change", async () => {
+    const target = getStudyEditableTargets()[studyEditingTarget];
+    if (!target) return;
+    await insertInlineImageToEditor(target.id, els.studyInlineImageInput);
+  });
+}
+
+function bindEvents() {
+  bindEditorSurface(els.questionEditor);
+  bindEditorSurface(els.answerEditor);
+  bindEditorSurface(els.studyQuestion);
+  bindEditorSurface(els.studyAnswer);
+  bindEditorSurface(els.studyQuestionSplit);
+  bindEditorSurface(els.studyAnswerSplit);
+
+  bindRichToolbarEvents();
+  bindStudyInlineToolbarEvents();
+
+  els.navBtns.forEach(btn => {
+    btn.addEventListener("click", () => switchView(btn.dataset.view));
+  });
+
+  els.addNoteBtn.addEventListener("click", () => openModal());
+  els.addNoteFromNotesBtn.addEventListener("click", () => openModal(null, { deckId: currentDeckWall || "" }));
+  els.addDeckBtn.addEventListener("click", () => openDeckModal());
+
+  els.studyTodayBtn.addEventListener("click", () => openStudyPreference({ type: "today" }));
+  els.studyTodayInlineBtn.addEventListener("click", () => openStudyPreference({ type: "today" }));
+  els.reviewToStudyBtn.addEventListener("click", () => openStudyPreference({ type: "today" }));
+
+  els.searchInput.addEventListener("input", renderNotes);
+
+  els.filterDeck.addEventListener("change", () => {
+    currentDeckWall = els.filterDeck.value;
+    renderNotes();
+  });
+
+  els.filterImportance.addEventListener("change", renderNotes);
+  els.filterDifficulty.addEventListener("change", renderNotes);
+  els.filterStudyState.addEventListener("change", renderNotes);
+  els.filterStarred.addEventListener("change", renderNotes);
+
+  els.prevMonthBtn.addEventListener("click", () => {
+    currentCalendarDate = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth() - 1, 1);
+    renderCalendar();
+  });
+
+  els.nextMonthBtn.addEventListener("click", () => {
+    currentCalendarDate = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth() + 1, 1);
+    renderCalendar();
+  });
+
+  els.todayMonthBtn.addEventListener("click", () => {
+    currentCalendarDate = new Date();
+    selectedCalendarDate = todayStr();
+    renderCalendar();
+  });
+
+  els.noteForm.addEventListener("submit", saveNoteFromModal);
+  els.closeModalBtn.addEventListener("click", closeModal);
+  els.cancelModalBtn.addEventListener("click", closeModal);
+
+  els.deleteNoteBtn.addEventListener("click", () => {
+    const id = els.noteId.value;
+    if (id) deleteNote(id);
+  });
+
+  els.scheduleModeInput.addEventListener("change", syncScheduleInputs);
+
+  els.curveStageInput.addEventListener("change", () => {
+    if (els.scheduleModeInput.value === "curve") {
+      els.nextReviewDateInput.value = getScheduleDateByStage(Number(els.curveStageInput.value || 0));
+    }
+  });
+
+  els.imageInput.addEventListener("change", () => {
+    modalDraftImages = [...modalDraftImages, ...[...els.imageInput.files].filter(isImageLikeFile)];
+    renderModalAttachmentPreview();
+    els.imageInput.value = "";
+  });
+
+  els.fileInput.addEventListener("change", () => {
+    modalDraftFiles = [...modalDraftFiles, ...[...els.fileInput.files]];
+    renderModalAttachmentPreview();
+    els.fileInput.value = "";
+  });
+
+  els.attachmentPreview.addEventListener("click", event => {
+    const btn = event.target.closest("[data-remove-attachment]");
+    if (!btn) return;
+    removeAttachment(btn.dataset.removeAttachment, Number(btn.dataset.index));
+  });
+
+  els.deckForm.addEventListener("submit", saveDeckFromModal);
+  els.closeDeckModalBtn.addEventListener("click", closeDeckModal);
+  els.cancelDeckModalBtn.addEventListener("click", closeDeckModal);
+
+  els.closeCustomReminderBtn.addEventListener("click", closeCustomReviewModal);
+  els.cancelCustomReviewBtn.addEventListener("click", closeCustomReviewModal);
+  els.saveCustomReviewBtn.addEventListener("click", saveCustomReview);
+
+  els.closeStudyPreferenceBtn.addEventListener("click", closeStudyPreference);
+  els.cancelStudyPreferenceBtn.addEventListener("click", closeStudyPreference);
+  els.startStudyBtn.addEventListener("click", startStudyMode);
+
+  els.studyEditBtn.addEventListener("click", enableStudyInlineEdit);
+  els.toggleStudyLayoutBtn.addEventListener("click", toggleStudyLayout);
+  els.exitStudyModeBtn.addEventListener("click", closeStudyMode);
+  els.studySaveInlineBtn.addEventListener("click", saveStudyInlineEdit);
+  els.studyCancelInlineBtn.addEventListener("click", cancelStudyInlineEdit);
+
+  els.studyForgotBtn.addEventListener("click", () => applyStudyAction("forgot"));
+  els.studyOkayBtn.addEventListener("click", () => applyStudyAction("okay"));
+  els.studyRememberedBtn.addEventListener("click", () => applyStudyAction("remembered"));
+  els.studyMasteredBtn.addEventListener("click", () => applyStudyAction("mastered"));
+  els.studyLaterBtn.addEventListener("click", () => applyStudyAction("later"));
+
+  els.studyPrevBtn.addEventListener("click", studyPrev);
+  els.studyNextBtn.addEventListener("click", studyNext);
+  els.studyFlipBtn.addEventListener("click", toggleStudyReveal);
+
+  els.studySplitRevealBtn.addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    studyState.answerVisible = true;
+    updateStudySplitAnswerVisibility();
+    updateStudyFlipButtonLabel();
+  });
+
+  els.studyCompleteCloseBtn.addEventListener("click", closeStudyMode);
+
+  els.studyCardInner.addEventListener("click", e => {
+    if (studyInlineEditing) return;
+    if (e.target.closest("img, a, button, .inline-image-box")) return;
+    toggleStudyReveal();
+  });
+
+  els.studySplitResizer.addEventListener("mousedown", beginSplitResize);
+  els.studySplitResizer.addEventListener("touchstart", beginSplitResize, { passive: false });
+  window.addEventListener("mousemove", onSplitResize);
+  window.addEventListener("touchmove", onSplitResize, { passive: false });
+  window.addEventListener("mouseup", endSplitResize);
+  window.addEventListener("touchend", endSplitResize);
+
+  els.defaultReminderInput.addEventListener("change", () => {
+    appState.settings.defaultReminderTime = els.defaultReminderInput.value || "09:00";
+    requestSave("提醒時間已更新");
+    showToast("已更新預設提醒時間", "", "success");
+  });
+
+  els.soundToggle.addEventListener("change", () => {
+    appState.settings.soundEnabled = els.soundToggle.checked;
+    requestSave("音效設定已更新");
+    if (appState.settings.soundEnabled) playSound("theme");
+  });
+
+  els.soundVolumeInput.addEventListener("input", () => {
+    appState.settings.soundVolume = Number(els.soundVolumeInput.value || 70);
+    requestSave("音量已更新");
+  });
+
+  els.reduceMotionToggle.addEventListener("change", () => {
+    appState.settings.reduceMotion = els.reduceMotionToggle.checked;
+    applyTheme(appState.settings.theme);
+    requestSave("動畫設定已更新");
+  });
+
+  els.testSoundBtn.addEventListener("click", () => playSound("mastered"));
+  els.enableNotifyBtn.addEventListener("click", requestNotificationPermission);
+
+  els.cakeKindInput.addEventListener("change", () => {
+    appState.settings.cakeKind = els.cakeKindInput.value.trim() || "🍰";
+    requestSave("蛋糕設定已更新");
+    renderCake();
+  });
+
+  els.cakeGoalInput.addEventListener("change", () => {
+    appState.settings.cakeGoal = clamp(Number(els.cakeGoalInput.value || 30), 3, 365);
+    requestSave("蛋糕設定已更新");
+    renderCake();
+  });
+
+  els.themeButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const theme = btn.dataset.theme || "cream";
+      applyTheme(theme);
+      requestSave("主題已更新");
+      playSound("theme");
+      showToast("已套用主題", THEMES[theme]?.label || "", "success");
+    });
+  });
+
+  els.exportBackupBtn.addEventListener("click", exportBackup);
+
+  els.importMergeBtn.addEventListener("click", () => {
+    importMode = "merge";
+    els.importBackupInput.click();
+  });
+
+  els.importReplaceBtn.addEventListener("click", () => {
+    importMode = "replace";
+    els.importBackupInput.click();
+  });
+
+  els.importBackupInput.addEventListener("change", e => importBackupFile(e.target.files[0]));
+  els.resetAllBtn.addEventListener("click", resetAllData);
+
+  els.closeTableInsertBtn.addEventListener("click", closeTableInsertModal);
+  els.cancelTableInsertBtn.addEventListener("click", closeTableInsertModal);
+
+  els.confirmTableInsertBtn.addEventListener("click", () => {
+    const rows = Math.max(2, Math.min(8, Number(els.tableRowsInput.value) || 2));
+    const cols = Math.max(2, Math.min(8, Number(els.tableColsInput.value) || 2));
+
+    if (pendingTableTarget) {
+      const editor = document.getElementById(pendingTableTarget);
+      if (editor) {
+        editor.focus();
+        activeEditorId = pendingTableTarget;
+        insertTableAtCursor(rows, cols);
+      }
+    }
+
+    closeTableInsertModal();
+  });
+
+  document.addEventListener("click", e => {
+    const img = e.target.closest(".js-lightboxable, .rich-content img, .rich-editor img");
+
+    if (img?.src) {
+      e.stopPropagation();
+      openLightbox(img.src);
+      return;
+    }
+
+    if (e.target === els.noteModal) closeModal();
+    if (e.target === els.deckModal) closeDeckModal();
+    if (e.target === els.customReminderModal) closeCustomReviewModal();
+    if (e.target === els.studyPreferenceModal) closeStudyPreference();
+    if (e.target === els.tableInsertModal) closeTableInsertModal();
+    if (e.target === els.lightboxModal) closeLightbox();
+  });
+
+  els.lightboxCloseBtn.addEventListener("click", closeLightbox);
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+      if (!els.lightboxModal.classList.contains("hidden")) closeLightbox();
+      else if (!els.noteModal.classList.contains("hidden")) closeModal();
+      else if (!els.deckModal.classList.contains("hidden")) closeDeckModal();
+      else if (!els.customReminderModal.classList.contains("hidden")) closeCustomReviewModal();
+      else if (!els.studyPreferenceModal.classList.contains("hidden")) closeStudyPreference();
+      else if (!els.tableInsertModal.classList.contains("hidden")) closeTableInsertModal();
+    }
+  });
+}
+
+/* ---------- expose for generated onclick ---------- */
+
+window.openModal = openModal;
+window.openEditModal = openEditModal;
+window.deleteNote = deleteNote;
+window.toggleStar = toggleStar;
+window.updateCurveStage = updateCurveStage;
+window.openDeckWall = openDeckWall;
+window.clearDeckWall = clearDeckWall;
+window.openDeckModal = openDeckModal;
+window.deleteDeck = deleteDeck;
+window.openStudyPreference = openStudyPreference;
+window.selectCalendarDate = selectCalendarDate;
+window.toggleReviewFlip = toggleReviewFlip;
+window.handleReview = handleReview;
+window.markMastered = markMastered;
+window.openCustomReviewModal = openCustomReviewModal;
+
+/* =========================================================
+   FINAL PATCH: clean deck sort + right click menu + card direct study
+   + searchable study preview rail + preview click navigation
+   ========================================================= */
+
+/*
+  使用方式：
+  1. 保留原始 script.js 到：
+     window.openCustomReviewModal = openCustomReviewModal;
+  2. 刪掉那行下面所有舊 Patch。
+  3. 貼上本 Final Patch。
+*/
+
+
+/* ---------- safe ready helper ---------- */
+
+function creamyFinalWhenReady(callback) {
+  const timer = setInterval(() => {
+    if (
+      appState &&
+      appState.decks &&
+      appState.notes &&
+      els &&
+      els.subjectDeckGrid &&
+      els.notesList &&
+      els.studyModeView
+    ) {
+      clearInterval(timer);
+      callback();
+    }
+  }, 40);
+}
+
+
+/* ---------- persistent UI state ---------- */
+
+const creamyFinalPreviewState = {
+  query: "",
+  scope: "queue"
+};
+
+let creamyFinalSplitDepthSaveTimer = null;
+
+
+/* ---------- small helpers ---------- */
+
+function creamyFinalNormalizeText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function creamyFinalSave(message = "已儲存") {
+  if (!appState) return;
+
+  if (typeof requestSave === "function") {
+    requestSave(message);
+    return;
+  }
+
+  if (typeof saveStateNow === "function") {
+    saveStateNow(appState, message);
+  }
+}
+
+function creamyFinalGetNoteText(note) {
+  return [
+    stripHtml(note.questionHtml || ""),
+    stripHtml(note.answerHtml || ""),
+    note.question || "",
+    note.answer || "",
+    note.notes || "",
+    getDeckName(note.deckId)
+  ].join(" ");
+}
+
+
+/* =========================================================
+   Deck order + subject deck rendering
+   ========================================================= */
+
+function getSubjectDeckOrderFinal() {
+  if (!appState.settings) appState.settings = {};
+
+  if (!Array.isArray(appState.settings.deckOrder)) {
+    appState.settings.deckOrder = [];
+  }
+
+  const knownIds = appState.decks.map(deck => deck.id);
+  const cleanIds = appState.settings.deckOrder.filter(id => knownIds.includes(id));
+
+  knownIds.forEach(id => {
+    if (!cleanIds.includes(id)) cleanIds.push(id);
+  });
+
+  appState.settings.deckOrder = cleanIds;
+
+  const deckMap = new Map(appState.decks.map(deck => [deck.id, deck]));
+
+  return cleanIds
+    .map(id => deckMap.get(id))
+    .filter(Boolean);
+}
+
+function saveSubjectDeckOrderFinal(ids) {
+  if (!appState.settings) appState.settings = {};
+
+  const knownIds = appState.decks.map(deck => deck.id);
+  const cleanIds = ids.filter(id => knownIds.includes(id));
+
+  knownIds.forEach(id => {
+    if (!cleanIds.includes(id)) cleanIds.push(id);
+  });
+
+  appState.settings.deckOrder = cleanIds;
+  creamyFinalSave("Deck 順序已儲存");
+}
+
+function renderSubjectDecks() {
+  const deckOrder = getSubjectDeckOrderFinal();
+
+  els.subjectDeckGrid.innerHTML = deckOrder.map(deck => {
+    const stats = getDeckStats(deck.id);
+
+    return `
+      <div
+        class="deck-wrap"
+        data-deck-id="${escapeAttr(deck.id)}"
+        data-context-deck="${escapeAttr(deck.id)}"
+        draggable="true"
+        title="左鍵進入卡片牆；右鍵開啟操作選單；可拖拉排序"
+      >
+        <button
+          class="subject-deck"
+          type="button"
+          style="--deck-color:${escapeAttr(deck.color)}"
+          onclick="openDeckWall('${escapeAttr(deck.id)}')"
+        >
+          <div class="subject-deck-top">
+            <span class="deck-name">${escapeHtml(deck.name)}</span>
+            <strong>${stats.total}</strong>
+          </div>
+
+          <div class="soft-text">
+            ${stats.due} 張到期 · ${stats.mastered} 張熟記
+          </div>
+
+          <div class="subject-deck-bottom">
+            <span>⚡ ${stats.due}</span>
+            <span>★ ${stats.starred}</span>
+          </div>
+        </button>
+
+        <div class="deck-actions-row">
+          <button class="deck-study-btn" type="button" onclick="openStudyPreference({type:'deck', deckId:'${escapeAttr(deck.id)}'})">開始複習</button>
+          <button class="deck-study-btn" type="button" onclick="openModal(null, { deckId:'${escapeAttr(deck.id)}' })">新增卡片</button>
+          <button class="tiny-btn" type="button" onclick="openDeckModal('${escapeAttr(deck.id)}')">改</button>
+          <button class="tiny-btn" type="button" onclick="deleteDeck('${escapeAttr(deck.id)}')">刪</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  enableSubjectDeckDragSortFinal();
+}
+
+function enableSubjectDeckDragSortFinal() {
+  const grid = document.getElementById("subjectDeckGrid");
+  if (!grid) return;
+
+  const wraps = Array.from(grid.querySelectorAll(".deck-wrap[data-deck-id]"));
+
+  wraps.forEach(wrap => {
+    wrap.setAttribute("draggable", "true");
+
+    if (wrap.dataset.creamyFinalDragBound === "1") return;
+    wrap.dataset.creamyFinalDragBound = "1";
+
+    wrap.addEventListener("dragstart", event => {
+      const deckId = wrap.dataset.deckId;
+      if (!deckId) return;
+
+      window.__creamyFinalDraggingDeckId = deckId;
+
+      wrap.classList.add("deck-dragging-final");
+      document.body.classList.add("deck-sorting-final");
+
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", deckId);
+    });
+
+    wrap.addEventListener("dragend", () => {
+      window.__creamyFinalDraggingDeckId = "";
+
+      wrap.classList.remove("deck-dragging-final");
+      document.body.classList.remove("deck-sorting-final");
+
+      document.querySelectorAll(".deck-drag-over-final").forEach(el => {
+        el.classList.remove("deck-drag-over-final");
+      });
+    });
+
+    wrap.addEventListener("dragover", event => {
+      const draggingId = window.__creamyFinalDraggingDeckId;
+      const targetId = wrap.dataset.deckId;
+
+      if (!draggingId || !targetId || draggingId === targetId) return;
+
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+
+      wrap.classList.add("deck-drag-over-final");
+    });
+
+    wrap.addEventListener("dragleave", () => {
+      wrap.classList.remove("deck-drag-over-final");
+    });
+
+    wrap.addEventListener("drop", event => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const dragId =
+        event.dataTransfer.getData("text/plain") ||
+        window.__creamyFinalDraggingDeckId;
+
+      const targetId = wrap.dataset.deckId;
+
+      if (!dragId || !targetId || dragId === targetId) return;
+
+      const currentIds = Array.from(
+        grid.querySelectorAll(".deck-wrap[data-deck-id]")
+      ).map(el => el.dataset.deckId);
+
+      const from = currentIds.indexOf(dragId);
+      const to = currentIds.indexOf(targetId);
+
+      if (from === -1 || to === -1) return;
+
+      const nextIds = [...currentIds];
+      const [moved] = nextIds.splice(from, 1);
+      nextIds.splice(to, 0, moved);
+
+      saveSubjectDeckOrderFinal(nextIds);
+      renderSubjectDecks();
+
+      if (typeof playSound === "function") playSound("preview");
+      if (typeof showToast === "function") {
+        showToast("Deck 順序已更新", "", "success");
+      }
+    });
+  });
+}
+
+
+/* =========================================================
+   Notes wall rendering: left click direct study + right click menu
+   ========================================================= */
+
+function renderNotes() {
+  populateDeckSelects();
+
+  if (currentDeckWall) {
+    els.filterDeck.value = currentDeckWall;
+  }
+
+  renderDeckWallHeader();
+
+  const notes = getFilteredNotes().sort((a, b) => {
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+
+  if (!notes.length) {
+    els.notesList.innerHTML = `<div class="empty-state">目前沒有符合條件的卡片。</div>`;
+    return;
+  }
+
+  els.notesList.innerHTML = notes.map(note => {
+    const qText = getPlainPreviewFromHtml(note.questionHtml, 90);
+    const deck = getDeck(note.deckId);
+    const fitClass = getFitClass(stripHtml(note.questionHtml));
+
+    return `
+      <div
+        class="wall-card creamy-card"
+        data-context-note="${escapeAttr(note.id)}"
+        data-click-study-note="${escapeAttr(note.id)}"
+        title="左鍵立即複習；右鍵開啟操作選單"
+      >
+        <div class="wall-card-top">
+          <div class="wall-card-tags">
+            <span class="mini-dot" style="--dot-color:${escapeAttr(deck.color)}"></span>
+            <span>${escapeHtml(deck.name)}</span>
+          </div>
+
+          <button
+            class="star-btn ${note.starred ? "active" : ""}"
+            type="button"
+            onclick="event.stopPropagation(); playSound('preview'); toggleStar('${escapeAttr(note.id)}')"
+            title="標星"
+          >
+            ${note.starred ? "★" : "☆"}
+          </button>
+        </div>
+
+        <div class="wall-title ${fitClass}">
+          ${escapeHtml(qText || "無文字問題")}
+        </div>
+
+        <div class="wall-bottom-subtle">
+          ${escapeHtml(getStudyStateLabel(note))}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+
+/* =========================================================
+   Fix selected calendar label bug
+   ========================================================= */
+
+function renderSelectedDateTasks() {
+  els.selectedDateLabel.textContent = formatDisplayDate(selectedCalendarDate);
+
+  const notes = appState.notes.filter(note =>
+    note.nextReviewDate === selectedCalendarDate ||
+    note.createdAt === selectedCalendarDate
+  );
+
+  if (!notes.length) {
+    els.selectedDateTasks.innerHTML = `<div class="empty-state">目前沒有內容。</div>`;
+    return;
+  }
+
+  els.selectedDateTasks.innerHTML = notes.map(note => `
+    <div class="task-card">
+      <div class="task-top">
+        <div>
+          <h4 class="task-title">${escapeHtml(getPlainPreviewFromHtml(note.questionHtml, 52))}</h4>
+          <div class="soft-text">${escapeHtml(getDeckName(note.deckId))} · ${escapeHtml(getCurveStageLabel(note.reviewStage))}</div>
+        </div>
+        <span class="badge ${note.importance}">${escapeHtml(getImportanceLabel(note.importance))}</span>
+      </div>
+
+      <div class="badge-row">
+        <span class="badge difficulty ${note.difficulty}">${escapeHtml(getDifficultyLabel(note.difficulty))}</span>
+        <span class="badge">${escapeHtml(getStudyStateLabel(note))}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+
+/* =========================================================
+   Context menu
+   ========================================================= */
+
+function ensureContextMenuFinal() {
+  let menu = document.getElementById("contextMenu");
+
+  if (!menu) {
+    menu = document.createElement("div");
+    menu.id = "contextMenu";
+    menu.className = "context-menu";
+    document.body.appendChild(menu);
+  }
+
+  return menu;
+}
+
+function hideContextMenuFinal() {
+  const menu = document.getElementById("contextMenu");
+  if (!menu) return;
+
+  menu.classList.remove("active");
+  menu.innerHTML = "";
+}
+
+function showContextMenuFinal(event, items) {
+  const menu = ensureContextMenuFinal();
+
+  menu.innerHTML = "";
+
+  items.forEach(item => {
+    if (item.type === "separator") {
+      const sep = document.createElement("div");
+      sep.className = "context-menu-sep";
+      menu.appendChild(sep);
+      return;
+    }
+
+    if (item.type === "select") {
+      const wrap = document.createElement("div");
+      wrap.className = "context-menu-select";
+
+      const label = document.createElement("label");
+      label.textContent = item.label;
+
+      const select = document.createElement("select");
+      select.innerHTML = item.options;
+      select.value = item.value;
+
+      select.addEventListener("change", () => {
+        if (typeof playSound === "function") playSound("preview");
+        item.onChange(select.value);
+        hideContextMenuFinal();
+      });
+
+      wrap.appendChild(label);
+      wrap.appendChild(select);
+      menu.appendChild(wrap);
+      return;
+    }
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = item.label;
+
+    if (item.danger) btn.classList.add("danger");
+    if (item.disabled) btn.disabled = true;
+
+    btn.addEventListener("click", e => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (typeof playSound === "function") {
+        playSound(item.sound || "preview");
+      }
+
+      hideContextMenuFinal();
+      item.onClick?.();
+    });
+
+    menu.appendChild(btn);
+  });
+
+  menu.classList.add("active");
+
+  const padding = 12;
+  const width = 260;
+  const estimatedHeight = Math.min(440, items.length * 50 + 24);
+
+  let x = event.clientX;
+  let y = event.clientY;
+
+  if (x + width > window.innerWidth - padding) {
+    x = window.innerWidth - width - padding;
+  }
+
+  if (y + estimatedHeight > window.innerHeight - padding) {
+    y = window.innerHeight - estimatedHeight - padding;
+  }
+
+  menu.style.left = `${Math.max(padding, x)}px`;
+  menu.style.top = `${Math.max(padding, y)}px`;
+}
+
+function openDeckActionMenuFinal(event, deckId) {
+  const deck = getDeck(deckId);
+  if (!deck) return;
+
+  showContextMenuFinal(event, [
+    {
+      label: "開始複習",
+      sound: "remembered",
+      onClick: () => openStudyPreference({ type: "deck", deckId })
+    },
+    {
+      label: "新增卡片",
+      sound: "insert",
+      onClick: () => openModal(null, { deckId })
+    },
+    { type: "separator" },
+    {
+      label: "改名 / 改色",
+      onClick: () => openDeckModal(deckId)
+    },
+    {
+      label: "刪除 Deck",
+      danger: true,
+      disabled: deck.protected || deck.id === "uncategorized",
+      onClick: () => deleteDeck(deckId)
+    }
+  ]);
+}
+
+function openNoteActionMenuFinal(event, noteId) {
+  const note = appState.notes.find(n => n.id === noteId);
+  if (!note) return;
+
+  const stageOptions = CURVE_DAYS.map((days, idx) => {
+    const selected = note.reviewStage === idx ? "selected" : "";
+    return `<option value="${idx}" ${selected}>${escapeHtml(getCurveStageLabel(idx))}</option>`;
+  }).join("");
+
+  showContextMenuFinal(event, [
+    {
+      label: "開始複習",
+      sound: "remembered",
+      onClick: () => openCardDirectStudyFinal(noteId)
+    },
+    {
+      label: "編輯",
+      onClick: () => openEditModal(noteId)
+    },
+    {
+      label: note.starred ? "取消星號" : "標星",
+      onClick: () => toggleStar(noteId)
+    },
+    { type: "separator" },
+    {
+      type: "select",
+      label: "記憶階段",
+      value: String(note.reviewStage || 0),
+      options: stageOptions,
+      onChange: value => updateCurveStage(noteId, value)
+    },
+    { type: "separator" },
+    {
+      label: "刪除",
+      danger: true,
+      sound: "forgot",
+      onClick: () => deleteNote(noteId)
+    }
+  ]);
+}
+
+
+/* =========================================================
+   Direct study from clicked wall card
+   ========================================================= */
+
+function getQuickStudyPrefsFinal() {
+  return {
+    order: "due-first",
+    viewMode: appState.settings.quickStudyViewMode || "split",
+    filter: "unmastered",
+    includeDone: "yes"
+  };
+}
+
+function enterStudyModeWithQueueFinal(queue, index, sourceType, sourceLabel, prefs) {
+  if (!queue.length) {
+    showToast("沒有可複習的卡片", "", "warn");
+    return;
+  }
+
+  studyState = {
+    active: true,
+    sourceType,
+    sourceLabel,
+    notes: queue,
+    index: clamp(index, 0, queue.length - 1),
+    total: queue.length,
+    answerVisible: false,
+    stats: {
+      remembered: 0,
+      okay: 0,
+      forgot: 0,
+      mastered: 0,
+      later: 0
+    },
+    preferences: prefs
+  };
+
+  studyInlineEditing = false;
+  studyEditingTarget = "answer";
+  studyEditDraft = {
+    questionHtml: "",
+    answerHtml: ""
+  };
+
+  els.studyPreferenceModal.classList.add("hidden");
+  els.studyModeView.classList.remove("hidden");
+  document.body.classList.add("study-open");
+
+  const ratio = clamp(appState.settings.splitRatio || 50, 28, 72);
+  els.studyCardSplit.style.setProperty("--split-left", `${ratio}%`);
+
+  applySavedSplitDepthFinal();
+
+  renderStudyMode();
+}
+
+function openCardDirectStudyFinal(noteId) {
+  const clickedNote = appState.notes.find(n => String(n.id) === String(noteId));
+  if (!clickedNote) return;
+
+  if (!isValidStudyQueueNote(clickedNote)) {
+    showToast("這張卡內容不完整", "請先編輯問題或答案內容。", "warn");
+    openEditModal(clickedNote.id);
+    return;
+  }
+
+  const sourceDeckId = currentDeckWall || clickedNote.deckId;
+  const prefs = getQuickStudyPrefsFinal();
+
+  let queue = buildStudyQueue(
+    { type: "deck", deckId: sourceDeckId },
+    prefs
+  );
+
+  /*
+    關鍵修正：
+    不再只靠 index 指向被點擊的卡。
+    直接把被點擊的卡放到 queue[0]。
+    這樣就算後面某個 render wrapper / preview fallback 偷偷把 index 重設成 0，
+    也一定會顯示使用者點的卡，而不是「量宮高技巧」或其他第一張。
+  */
+  queue = queue.filter(note => String(note.id) !== String(clickedNote.id));
+  queue.unshift(clickedNote);
+
+  /*
+    去重，避免同一張卡因為 appState copy / queue copy 出現兩次。
+  */
+  const seen = new Set();
+  queue = queue.filter(note => {
+    if (!note?.id) return false;
+    const key = String(note.id);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  window.__creamyForcedActiveStudyNoteId = String(clickedNote.id);
+  window.__creamyForcedActiveStudyNoteUntil = Date.now() + 1200;
+
+  const label = `${getDeckName(sourceDeckId)} Deck`;
+
+  if (typeof playSound === "function") playSound("remembered");
+
+  enterStudyModeWithQueueFinal(queue, 0, "deck", label, prefs);
+}
+
+
+/* =========================================================
+   Study preview rail
+   ========================================================= */
+
+function ensureStudyPreviewRailFinal() {
+  let rail = document.getElementById("studyPreviewRail");
+
+  if (!rail) {
+    rail = document.createElement("aside");
+    rail.id = "studyPreviewRail";
+    rail.className = "study-preview-rail creamy-card";
+
+    const progress = document.querySelector(".study-progress-wrap");
+    const stage = document.getElementById("studyStage");
+    const shell = document.querySelector(".study-shell");
+
+    if (progress?.parentNode) {
+      progress.insertAdjacentElement("afterend", rail);
+    } else if (stage?.parentNode) {
+      stage.parentNode.insertBefore(rail, stage);
+    } else if (shell) {
+      shell.appendChild(rail);
+    }
+  }
+
+  return rail;
+}
+
+function getStudyPreviewTitleFinal() {
+  if (studyState.sourceType === "today") return "今日待複習";
+  if (studyState.sourceType === "deck") return studyState.sourceLabel || "Deck 卡片";
+  if (studyState.sourceType === "single") return "目前卡片";
+  return "複習清單";
+}
+
+function getStudyPreviewFitClassFinal(text) {
+  const len = [...String(text || "")].length;
+
+  if (len > 170) return "preview-fit-tiny";
+  if (len > 120) return "preview-fit-small";
+  if (len > 74) return "preview-fit-medium";
+
+  return "preview-fit-normal";
+}
+
+function noteMatchesStudyPreviewSearchFinal(note, query) {
+  const q = creamyFinalNormalizeText(query);
+
+  if (!q) return true;
+
+  const haystack = creamyFinalNormalizeText(creamyFinalGetNoteText(note));
+
+  return haystack.includes(q);
+}
+
+function getStudyPreviewCandidatesFinal() {
+  if (!studyState?.active) return [];
+
+  const query = creamyFinalPreviewState.query || "";
+  const scope = creamyFinalPreviewState.scope || "queue";
+
+  let base = studyState.notes || [];
+
+  if (scope === "all") {
+    base = appState.notes || [];
+  }
+
+  let list = base.filter(note => noteMatchesStudyPreviewSearchFinal(note, query));
+
+  if (scope === "all") {
+    const deckOrder = getSubjectDeckOrderFinal().map(deck => deck.id);
+
+    list = [...list].sort((a, b) => {
+      const ai = deckOrder.indexOf(a.deckId);
+      const bi = deckOrder.indexOf(b.deckId);
+
+      if (ai !== bi) return ai - bi;
+
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    });
+  }
+
+  return list;
+}
+
+function getStudyQueueIndexByNoteIdFinal(noteId) {
+  return (studyState.notes || []).findIndex(note => note.id === noteId);
+}
+
+function jumpStudyPreviewByNoteFinal(noteId) {
+  if (studyInlineEditing) {
+    showToast("請先儲存或取消編輯", "", "warn");
+    return;
+  }
+
+  if (!studyState?.active) return;
+
+  const note = appState.notes.find(n => String(n.id) === String(noteId));
+  if (!note) return;
+
+  if (!isValidStudyQueueNote(note)) {
+    showToast("這張卡內容不完整", "請先編輯卡片內容。", "warn");
+    return;
+  }
+
+  /*
+    關鍵修正：
+    preview 點擊也一樣，把目標卡移到目前 queue 第一張。
+    避免某些 render wrapper 把 index 重設為 0 時，又跳回原本第一張。
+  */
+  studyState.notes = studyState.notes.filter(n => String(n.id) !== String(note.id));
+  studyState.notes.unshift(note);
+  studyState.index = 0;
+  studyState.total = studyState.notes.length;
+  studyState.answerVisible = false;
+
+  window.__creamyForcedActiveStudyNoteId = String(note.id);
+  window.__creamyForcedActiveStudyNoteUntil = Date.now() + 1200;
+
+  if (typeof playSound === "function") playSound("preview");
+
+  renderStudyMode();
+}
+
+function renderStudyPreviewRailFinal() {
+  const shell = document.querySelector(".study-shell");
+  if (!shell) return;
+
+  const rail = ensureStudyPreviewRailFinal();
+
+  if (!studyState?.active || !studyState.notes?.length) {
+    shell.classList.remove("study-with-rail");
+    rail.classList.add("hidden");
+    rail.innerHTML = "";
+    return;
+  }
+
+  shell.classList.add("study-with-rail");
+  rail.classList.remove("hidden");
+
+  const title = getStudyPreviewTitleFinal();
+  const candidates = getStudyPreviewCandidatesFinal();
+  const activeNote = studyState.notes[studyState.index];
+
+  rail.innerHTML = `
+    <div class="study-preview-head">
+      <h4>${escapeHtml(title)}</h4>
+      <span>${studyState.notes.length} 張</span>
+    </div>
+
+    <div class="study-preview-tools">
+      <input
+        id="studyPreviewSearchInput"
+        class="study-preview-search"
+        type="search"
+        placeholder="搜尋卡片…"
+        value="${escapeAttr(creamyFinalPreviewState.query || "")}"
+        autocomplete="off"
+      />
+
+      <select
+        id="studyPreviewScopeSelect"
+        class="study-preview-scope"
+        title="搜尋範圍"
+      >
+        <option value="queue" ${creamyFinalPreviewState.scope === "queue" ? "selected" : ""}>目前</option>
+        <option value="all" ${creamyFinalPreviewState.scope === "all" ? "selected" : ""}>全部</option>
+      </select>
+    </div>
+
+    <div class="study-preview-list">
+      ${
+        candidates.length
+          ? candidates.map(note => {
+              const deck = getDeck(note.deckId);
+              const q = getPlainPreviewFromHtml(note.questionHtml, 120);
+              const queueIndex = getStudyQueueIndexByNoteIdFinal(note.id);
+              const forcedActiveId = window.__creamyForcedActiveStudyNoteId || "";
+const currentActiveId = forcedActiveId || activeNote?.id || "";
+const active = String(currentActiveId) === String(note.id) ? "active" : "";
+              const fromAll = queueIndex === -1 ? "from-all-decks" : "";
+              const fit = getStudyPreviewFitClassFinal(q);
+
+              return `
+                <button
+                  type="button"
+                  class="study-preview-card ${active} ${fromAll} ${fit}"
+                  data-study-preview-note="${escapeAttr(note.id)}"
+                  title="切換到這張卡片"
+                >
+                  <div class="study-preview-top">
+                    <span class="study-preview-dot" style="--dot-color:${escapeAttr(deck.color)}"></span>
+                    <span>${escapeHtml(deck.name)}</span>
+                  </div>
+
+                  <div class="study-preview-q">
+                    ${escapeHtml(q || "無文字問題")}
+                  </div>
+
+                  <div class="study-preview-meta">
+                    <span class="study-preview-pill">${escapeHtml(getStudyStateLabel(note))}</span>
+                    <span class="study-preview-pill">${escapeHtml(getCurveStageLabel(note.reviewStage))}</span>
+                    ${queueIndex === -1 ? `<span class="study-preview-pill extra">可加入</span>` : ""}
+                  </div>
+                </button>
+              `;
+            }).join("")
+          : `<div class="study-preview-empty">沒有符合搜尋的卡片</div>`
+      }
+    </div>
+  `;
+}
+
+function renderStudyPreviewRailKeepFocusFinal() {
+  const oldInput = document.getElementById("studyPreviewSearchInput");
+  const hadFocus = document.activeElement === oldInput;
+  const cursor = oldInput ? oldInput.selectionStart : null;
+
+  renderStudyPreviewRailFinal();
+
+  if (hadFocus) {
+    requestAnimationFrame(() => {
+      const input = document.getElementById("studyPreviewSearchInput");
+      if (!input) return;
+
+      input.focus();
+
+      const pos = typeof cursor === "number" ? cursor : input.value.length;
+      input.setSelectionRange(pos, pos);
+    });
+  }
+}
+
+
+/* =========================================================
+   Wrap study mode render / close
+   ========================================================= */
+
+if (!window.__creamyFinalBaseRenderStudyMode) {
+  window.__creamyFinalBaseRenderStudyMode = renderStudyMode;
+}
+
+renderStudyMode = async function() {
+  await window.__creamyFinalBaseRenderStudyMode();
+
+  if (studyState?.active) {
+    renderStudyPreviewRailFinal();
+
+    /*
+      原本進度是以 doneCount 計算。
+      有左側 preview 後，改成顯示目前位置比較直覺。
+    */
+    if (els.studyProgressText && studyState.total) {
+      els.studyProgressText.textContent = `${studyState.index + 1} / ${studyState.total}`;
+    }
+
+    if (els.studyRemainingText) {
+      els.studyRemainingText.textContent = `清單 ${studyState.notes.length} 張`;
+    }
+
+    applySavedSplitDepthFinal();
+  }
+};
+
+if (!window.__creamyFinalBaseCloseStudyMode) {
+  window.__creamyFinalBaseCloseStudyMode = closeStudyMode;
+}
+
+closeStudyMode = function() {
+  window.__creamyFinalBaseCloseStudyMode();
+
+  const shell = document.querySelector(".study-shell");
+  const rail = document.getElementById("studyPreviewRail");
+
+  shell?.classList.remove("study-with-rail");
+
+  if (rail) {
+    rail.classList.add("hidden");
+    rail.innerHTML = "";
+  }
+};
+
+
+/* =========================================================
+   RenderAll wrap
+   ========================================================= */
+
+if (!window.__creamyFinalBaseRenderAll) {
+  window.__creamyFinalBaseRenderAll = renderAll;
+}
+
+renderAll = async function() {
+  await window.__creamyFinalBaseRenderAll();
+
+  fixStreakStatColorFinal();
+  enableSubjectDeckDragSortFinal();
+
+  if (studyState?.active) {
+    renderStudyPreviewRailFinal();
+  }
+};
+
+
+/* =========================================================
+   Split depth persistence
+   ========================================================= */
+
+function applySavedSplitDepthFinal() {
+  if (!els.studyCardSplit || !appState?.settings) return;
+
+  const saved = Number(appState.settings.splitDepth || 0);
+
+  if (saved) {
+    const safe = clamp(saved, 520, 1400);
+    els.studyCardSplit.style.setProperty("--study-depth", `${safe}px`);
+  }
+}
+
+function observeStudySplitDepthFinal() {
+  if (!window.ResizeObserver || !els.studyCardSplit) return;
+  if (window.__creamyFinalSplitObserverBound) return;
+
+  window.__creamyFinalSplitObserverBound = true;
+
+  const observer = new ResizeObserver(entries => {
+    if (!studyState?.active) return;
+    if (studyState.preferences.viewMode !== "split") return;
+
+    const entry = entries[0];
+    if (!entry) return;
+
+    const height = Math.round(entry.contentRect.height);
+    if (height < 520) return;
+
+    clearTimeout(creamyFinalSplitDepthSaveTimer);
+
+    creamyFinalSplitDepthSaveTimer = setTimeout(() => {
+      appState.settings.splitDepth = height;
+      creamyFinalSave("Split 深度已儲存");
+    }, 600);
+  });
+
+  observer.observe(els.studyCardSplit);
+}
+
+
+/* =========================================================
+   Streak color fix
+   ========================================================= */
+
+function fixStreakStatColorFinal() {
+  const stat = document.getElementById("statStreak");
+  if (!stat) return;
+
+  const strong = stat.closest("strong");
+  const card = stat.closest(".stat-card");
+
+  const color =
+    getComputedStyle(card || document.body).getPropertyValue("--text") ||
+    getComputedStyle(document.body).color ||
+    "#3c322d";
+
+  stat.style.color = color;
+  stat.style.webkitTextFillColor = color;
+  stat.style.background = "none";
+  stat.style.backgroundImage = "none";
+  stat.style.opacity = "1";
+
+  if (strong) {
+    strong.style.color = color;
+    strong.style.webkitTextFillColor = color;
+    strong.style.background = "none";
+    strong.style.backgroundImage = "none";
+  }
+}
+
+
+/* =========================================================
+   Events
+   ========================================================= */
+
+function bindCreamyFinalEvents() {
+  if (window.__creamyFinalEventsBound) return;
+  window.__creamyFinalEventsBound = true;
+
+  /*
+    左鍵點卡片庫卡片：直接進複習。
+  */
+  document.addEventListener("click", event => {
+    const card = event.target.closest("[data-click-study-note], [data-context-note]");
+    if (!card) return;
+
+    if (event.target.closest(".star-btn, button, select, a, img, .context-menu")) {
+      return;
+    }
+
+    const noteId = card.dataset.clickStudyNote || card.dataset.contextNote;
+    if (!noteId) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    openCardDirectStudyFinal(noteId);
+  }, true);
+
+  /*
+    右鍵選單：Deck / note。
+  */
+  document.addEventListener("contextmenu", event => {
+    const noteCard = event.target.closest("[data-context-note]");
+    const deckCard = event.target.closest("[data-context-deck]");
+
+    if (noteCard) {
+      event.preventDefault();
+      event.stopPropagation();
+      openNoteActionMenuFinal(event, noteCard.dataset.contextNote);
+      return;
+    }
+
+    if (deckCard) {
+      event.preventDefault();
+      event.stopPropagation();
+      openDeckActionMenuFinal(event, deckCard.dataset.contextDeck);
+      return;
+    }
+
+    hideContextMenuFinal();
+  });
+
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".context-menu")) {
+      hideContextMenuFinal();
+    }
+  });
+
+  window.addEventListener("scroll", hideContextMenuFinal, true);
+  window.addEventListener("resize", hideContextMenuFinal);
+
+  /*
+    Preview 搜尋。
+  */
+  document.addEventListener("input", event => {
+    const input = event.target.closest("#studyPreviewSearchInput");
+    if (!input) return;
+
+    creamyFinalPreviewState.query = input.value || "";
+    renderStudyPreviewRailKeepFocusFinal();
+  });
+
+  document.addEventListener("change", event => {
+    const select = event.target.closest("#studyPreviewScopeSelect");
+    if (!select) return;
+
+    creamyFinalPreviewState.scope = select.value === "all" ? "all" : "queue";
+
+    if (typeof playSound === "function") playSound("preview");
+
+    renderStudyPreviewRailFinal();
+  });
+
+  /*
+    Preview 卡片點擊：切換到該卡。
+  */
+  document.addEventListener("click", event => {
+    const btn = event.target.closest("[data-study-preview-note]");
+    if (!btn) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    jumpStudyPreviewByNoteFinal(btn.dataset.studyPreviewNote);
+  });
+
+  /*
+    Modal backdrop 修正：
+    避免編輯器選字時滑出 modal 導致 noteModal 被關掉。
+  */
+  document.addEventListener("click", event => {
+    if (event.target === els.noteModal) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  /*
+    UI 音效補強。
+  */
+  document.addEventListener("click", event => {
+    const target = event.target.closest(`
+      .nav-btn,
+      #studyTodayBtn,
+      #studyTodayInlineBtn,
+      #reviewToStudyBtn,
+      #addNoteBtn,
+      #addNoteFromNotesBtn,
+      #startStudyBtn,
+      #addDeckBtn,
+      #studyForgotBtn,
+      #studyOkayBtn,
+      #studyRememberedBtn,
+      #studyMasteredBtn,
+      #studyLaterBtn,
+      #studyPrevBtn,
+      #studyNextBtn,
+      #studyFlipBtn
+    `);
+
+    if (!target) return;
+
+    if (target.id === "studyForgotBtn") playSound("forgot");
+    else if (target.id === "studyMasteredBtn") playSound("mastered");
+    else if (target.id === "studyRememberedBtn") playSound("remembered");
+    else playSound("preview");
+  }, true);
+
+  observeStudySplitDepthFinal();
+}
+
+
+/* =========================================================
+   Init final patch
+   ========================================================= */
+
+document.addEventListener("DOMContentLoaded", () => {
+  creamyFinalWhenReady(() => {
+    bindCreamyFinalEvents();
+    fixStreakStatColorFinal();
+    enableSubjectDeckDragSortFinal();
+    applySavedSplitDepthFinal();
+  });
+});
+
+
+/* ---------- expose ---------- */
+
+window.openCardDirectStudyFinal = openCardDirectStudyFinal;
+window.jumpStudyPreviewByNoteFinal = jumpStudyPreviewByNoteFinal;
+window.renderStudyPreviewRailFinal = renderStudyPreviewRailFinal;
+window.enableSubjectDeckDragSortFinal = enableSubjectDeckDragSortFinal;
+
+/* =========================================================
+   HOTFIX A:
+   1. Fix study preview search double typing
+   2. Add search target: Q+A / Question / Answer / Deck / All
+   3. Restore / enhance sound effects, including "preview"
+   貼到 script.js 最底部
+   ========================================================= */
+
+
+/* ---------- HOTFIX sound ---------- */
+
+window.CREAMY_SOUND_MASTER_GAIN = 0.24;
+
+playSound = function(type = "save") {
+  if (!appState?.settings?.soundEnabled) return;
+
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const ctx = new AudioContext();
+    const volume = clamp(appState.settings.soundVolume ?? 70, 0, 100) / 100;
+
+    const master = ctx.createGain();
+    master.gain.value = window.CREAMY_SOUND_MASTER_GAIN * volume;
+    master.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+
+    const playTone = (freq, start, duration, wave = "sine", gainScale = 1) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = wave;
+      osc.frequency.value = freq;
+
+      gain.gain.setValueAtTime(0.0001, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.72 * gainScale, now + start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + start + duration);
+
+      osc.connect(gain);
+      gain.connect(master);
+
+      osc.start(now + start);
+      osc.stop(now + start + duration + 0.03);
+    };
+
+    if (type === "save") {
+      playTone(420, 0, 0.12);
+      playTone(620, 0.08, 0.16);
+    } else if (type === "error") {
+      playTone(190, 0, 0.22, "sawtooth", 0.72);
+      playTone(150, 0.14, 0.18, "sawtooth", 0.62);
+    } else if (type === "forgot") {
+      playTone(260, 0, 0.16, "triangle");
+      playTone(220, 0.12, 0.18, "triangle");
+    } else if (type === "remembered") {
+      playTone(520, 0, 0.09);
+      playTone(720, 0.07, 0.13);
+    } else if (type === "mastered") {
+      playTone(520, 0, 0.12);
+      playTone(660, 0.08, 0.12);
+      playTone(880, 0.16, 0.22);
+    } else if (type === "complete") {
+      playTone(440, 0, 0.12);
+      playTone(660, 0.1, 0.12);
+      playTone(880, 0.2, 0.16);
+      playTone(990, 0.32, 0.22);
+    } else if (type === "notify") {
+      playTone(330, 0, 0.14);
+      playTone(660, 0.16, 0.18);
+    } else if (type === "insert") {
+      playTone(700, 0, 0.08);
+    } else if (type === "theme") {
+      playTone(600, 0, 0.08);
+      playTone(900, 0.06, 0.12);
+    } else if (type === "preview") {
+      playTone(540, 0, 0.07);
+      playTone(760, 0.055, 0.1);
+    } else {
+      playTone(620, 0, 0.1);
+    }
+
+    setTimeout(() => ctx.close?.(), 1000);
+  } catch {
+    // ignore
+  }
+};
+
+
+/* ---------- HOTFIX preview search state ---------- */
+
+if (typeof creamyFinalPreviewState !== "undefined") {
+  if (!creamyFinalPreviewState.target) {
+    creamyFinalPreviewState.target = "both";
+  }
+}
+
+
+/* ---------- HOTFIX search text helpers ---------- */
+
+function creamyHotfixGetSearchTextByTarget(note, target) {
+  const questionText = stripHtml(note.questionHtml || note.question || "");
+  const answerText = stripHtml(note.answerHtml || note.answer || "");
+  const deckText = getDeckName(note.deckId);
+  const noteText = note.notes || "";
+
+  if (target === "question") {
+    return questionText;
+  }
+
+  if (target === "answer") {
+    return answerText;
+  }
+
+  if (target === "deck") {
+    return deckText;
+  }
+
+  if (target === "all") {
+    return [
+      questionText,
+      answerText,
+      deckText,
+      noteText
+    ].join(" ");
+  }
+
+  /*
+    default: both
+  */
+  return [
+    questionText,
+    answerText
+  ].join(" ");
+}
+
+function noteMatchesStudyPreviewSearchFinal(note, query) {
+  const q = creamyFinalNormalizeText(query);
+  if (!q) return true;
+
+  const target = creamyFinalPreviewState.target || "both";
+  const haystack = creamyFinalNormalizeText(
+    creamyHotfixGetSearchTextByTarget(note, target)
+  );
+
+  return haystack.includes(q);
+}
+
+
+/* ---------- HOTFIX render rail with search target select ---------- */
+
+function renderStudyPreviewRailFinal() {
+  const shell = document.querySelector(".study-shell");
+  if (!shell) return;
+
+  const rail = ensureStudyPreviewRailFinal();
+
+  if (!studyState?.active || !studyState.notes?.length) {
+    shell.classList.remove("study-with-rail");
+    rail.classList.add("hidden");
+    rail.innerHTML = "";
+    return;
+  }
+
+  shell.classList.add("study-with-rail");
+  rail.classList.remove("hidden");
+
+  const title = getStudyPreviewTitleFinal();
+  const candidates = getStudyPreviewCandidatesFinal();
+  const activeNote = studyState.notes[studyState.index];
+
+  rail.innerHTML = `
+    <div class="study-preview-head">
+      <h4>${escapeHtml(title)}</h4>
+      <span>${studyState.notes.length} 張</span>
+    </div>
+
+    <div class="study-preview-tools study-preview-tools-hotfix">
+      <input
+        id="studyPreviewSearchInput"
+        class="study-preview-search"
+        type="search"
+        placeholder="搜尋卡片…"
+        value="${escapeAttr(creamyFinalPreviewState.query || "")}"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        inputmode="search"
+      />
+
+      <select
+        id="studyPreviewTargetSelect"
+        class="study-preview-scope"
+        title="搜尋欄位"
+      >
+        <option value="both" ${creamyFinalPreviewState.target === "both" ? "selected" : ""}>Q+A</option>
+        <option value="question" ${creamyFinalPreviewState.target === "question" ? "selected" : ""}>問題</option>
+        <option value="answer" ${creamyFinalPreviewState.target === "answer" ? "selected" : ""}>答案</option>
+        <option value="deck" ${creamyFinalPreviewState.target === "deck" ? "selected" : ""}>Deck</option>
+        <option value="all" ${creamyFinalPreviewState.target === "all" ? "selected" : ""}>全部欄位</option>
+      </select>
+
+      <select
+        id="studyPreviewScopeSelect"
+        class="study-preview-scope"
+        title="搜尋範圍"
+      >
+        <option value="queue" ${creamyFinalPreviewState.scope === "queue" ? "selected" : ""}>目前</option>
+        <option value="all" ${creamyFinalPreviewState.scope === "all" ? "selected" : ""}>全部</option>
+      </select>
+    </div>
+
+    <div class="study-preview-list" id="studyPreviewList">
+      ${
+        candidates.length
+          ? candidates.map(note => {
+              const deck = getDeck(note.deckId);
+              const q = getPlainPreviewFromHtml(note.questionHtml, 120);
+              const queueIndex = getStudyQueueIndexByNoteIdFinal(note.id);
+              const forcedActiveId = window.__creamyForcedActiveStudyNoteId || "";
+const currentActiveId = forcedActiveId || activeNote?.id || "";
+const active = String(currentActiveId) === String(note.id) ? "active" : "";
+              const fromAll = queueIndex === -1 ? "from-all-decks" : "";
+              const fit = getStudyPreviewFitClassFinal(q);
+
+              return `
+                <button
+                  type="button"
+                  class="study-preview-card ${active} ${fromAll} ${fit}"
+                  data-study-preview-note="${escapeAttr(note.id)}"
+                  title="切換到這張卡片"
+                >
+                  <div class="study-preview-top">
+                    <span class="study-preview-dot" style="--dot-color:${escapeAttr(deck.color)}"></span>
+                    <span>${escapeHtml(deck.name)}</span>
+                  </div>
+
+                  <div class="study-preview-q">
+                    ${escapeHtml(q || "無文字問題")}
+                  </div>
+
+                  <div class="study-preview-meta">
+                    <span class="study-preview-pill">${escapeHtml(getStudyStateLabel(note))}</span>
+                    <span class="study-preview-pill">${escapeHtml(getCurveStageLabel(note.reviewStage))}</span>
+                    ${queueIndex === -1 ? `<span class="study-preview-pill extra">可加入</span>` : ""}
+                  </div>
+                </button>
+              `;
+            }).join("")
+          : `<div class="study-preview-empty">沒有符合搜尋的卡片</div>`
+      }
+    </div>
+  `;
+}
+
+
+/* ---------- HOTFIX no-rerender live filtering ---------- */
+
+function creamyHotfixApplyPreviewSearchFilter() {
+  if (!studyState?.active) return;
+
+  const input = document.getElementById("studyPreviewSearchInput");
+  if (input) {
+    creamyFinalPreviewState.query = input.value || "";
+  }
+
+  const query = creamyFinalPreviewState.query || "";
+  const scope = creamyFinalPreviewState.scope || "queue";
+  const cards = Array.from(document.querySelectorAll("[data-study-preview-note]"));
+
+  let visibleCount = 0;
+
+  cards.forEach(card => {
+    const noteId = card.dataset.studyPreviewNote;
+    const note = appState.notes.find(n => n.id === noteId);
+
+    if (!note) {
+      card.hidden = true;
+      return;
+    }
+
+    /*
+      scope = queue 時，只顯示 queue 內。
+      scope = all 時，renderStudyPreviewRailFinal 本身會重畫全部。
+      這裡仍保險處理。
+    */
+    if (scope === "queue" && getStudyQueueIndexByNoteIdFinal(note.id) === -1) {
+      card.hidden = true;
+      return;
+    }
+
+    const matched = noteMatchesStudyPreviewSearchFinal(note, query);
+    card.hidden = !matched;
+
+    if (matched) visibleCount += 1;
+  });
+
+  let empty = document.getElementById("studyPreviewEmptyHotfix");
+  const list = document.getElementById("studyPreviewList");
+
+  if (!list) return;
+
+  if (!visibleCount) {
+    if (!empty) {
+      empty = document.createElement("div");
+      empty.id = "studyPreviewEmptyHotfix";
+      empty.className = "study-preview-empty";
+      empty.textContent = "沒有符合搜尋的卡片";
+      list.appendChild(empty);
+    }
+  } else if (empty) {
+    empty.remove();
+  }
+}
+
+
+/* 
+  重要：
+  覆寫舊的 keep focus function。
+  之前每次 input 都 innerHTML 重畫，會造成打字 double。
+  現在 input 時只 filter，不重畫。
+*/
+function renderStudyPreviewRailKeepFocusFinal() {
+  creamyHotfixApplyPreviewSearchFilter();
+}
+
+
+/* ---------- HOTFIX event binding ---------- */
+
+function bindCreamyHotfixPreviewEvents() {
+  if (window.__creamyHotfixPreviewEventsBound) return;
+  window.__creamyHotfixPreviewEventsBound = true;
+
+  /*
+    使用 beforeinput / input 時，不重新 render rail。
+    只做 live filter，避免中文字/英文輸入被重送造成 double typing。
+  */
+  document.addEventListener("input", event => {
+    const input = event.target.closest("#studyPreviewSearchInput");
+    if (!input) return;
+
+    creamyFinalPreviewState.query = input.value || "";
+    creamyHotfixApplyPreviewSearchFilter();
+  }, true);
+
+  document.addEventListener("change", event => {
+    const targetSelect = event.target.closest("#studyPreviewTargetSelect");
+    if (targetSelect) {
+      creamyFinalPreviewState.target = targetSelect.value || "both";
+      creamyHotfixApplyPreviewSearchFilter();
+      if (typeof playSound === "function") playSound("preview");
+      return;
+    }
+
+    const scopeSelect = event.target.closest("#studyPreviewScopeSelect");
+    if (scopeSelect) {
+      creamyFinalPreviewState.scope = scopeSelect.value === "all" ? "all" : "queue";
+
+      /*
+        scope 從目前切全部時，需要重畫候選清單；
+        但這不是打字，不會造成 double typing。
+      */
+      renderStudyPreviewRailFinal();
+
+      if (typeof playSound === "function") playSound("preview");
+    }
+  }, true);
+
+  /*
+    使用者第一次互動時 resume AudioContext 限制。
+    雖然 playSound 每次都 new AudioContext，
+    但部分瀏覽器仍需要先有 user gesture。
+  */
+  document.addEventListener("pointerdown", () => {
+    window.__creamyAudioUnlocked = true;
+  }, { once: true, capture: true });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  creamyFinalWhenReady(() => {
+    bindCreamyHotfixPreviewEvents();
+
+    if (studyState?.active) {
+      renderStudyPreviewRailFinal();
+    }
+  });
+});
+
+
+/* ---------- expose ---------- */
+
+window.creamyHotfixApplyPreviewSearchFilter = creamyHotfixApplyPreviewSearchFilter;
+
+/* =========================================================
+   HOTFIX B:
+   Fix add-card modal sometimes opening scrolled to lower area
+   貼到 script.js 最底部
+   ========================================================= */
+
+
+/* ---------- modal scroll helpers ---------- */
+
+function creamyModalGetScrollableParentsFinal(el) {
+  const list = [];
+  let node = el;
+
+  while (node && node !== document.body && node !== document.documentElement) {
+    const style = window.getComputedStyle(node);
+    const overflowY = style.overflowY;
+
+    const canScroll =
+      (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") &&
+      node.scrollHeight > node.clientHeight + 4;
+
+    if (canScroll) {
+      list.push(node);
+    }
+
+    node = node.parentElement;
+  }
+
+  return list;
+}
+
+function creamyModalResetScrollFinal() {
+  const modal =
+    document.getElementById("noteModal") ||
+    els?.noteModal;
+
+  if (!modal) return;
+
+  const likelyScrollers = [
+    modal,
+    modal.querySelector(".modal"),
+    modal.querySelector(".modal-panel"),
+    modal.querySelector(".modal-content"),
+    modal.querySelector(".note-modal"),
+    modal.querySelector(".note-modal-body"),
+    modal.querySelector(".modal-body"),
+    modal.querySelector("form")
+  ].filter(Boolean);
+
+  const dynamicScrollers = creamyModalGetScrollableParentsFinal(
+    modal.querySelector("form") || modal
+  );
+
+  const allScrollers = Array.from(new Set([
+    ...likelyScrollers,
+    ...dynamicScrollers
+  ]));
+
+  allScrollers.forEach(el => {
+    try {
+      el.scrollTop = 0;
+      el.scrollLeft = 0;
+    } catch {
+      // ignore
+    }
+  });
+
+  /*
+    保險：如果 body/html 被某些瀏覽器拉動，也拉回原位。
+    注意這不是 window scroll，而是頁面本身。
+  */
+  try {
+    document.documentElement.scrollTop = document.documentElement.scrollTop;
+    document.body.scrollTop = document.body.scrollTop;
+  } catch {
+    // ignore
+  }
+}
+
+function creamyModalFocusTopFieldFinal() {
+  const modal =
+    document.getElementById("noteModal") ||
+    els?.noteModal;
+
+  if (!modal || modal.classList.contains("hidden")) return;
+
+  /*
+    優先 focus 最上面嘅 Deck select。
+    用 preventScroll，避免瀏覽器 focus 時又自動 scroll 落去。
+  */
+  const topField =
+    modal.querySelector("#noteDeckSelect") ||
+    modal.querySelector("#deckSelect") ||
+    modal.querySelector("[name='deckId']") ||
+    modal.querySelector("select") ||
+    modal.querySelector("input:not([type='hidden'])");
+
+  if (!topField) return;
+
+  try {
+    topField.focus({ preventScroll: true });
+  } catch {
+    try {
+      topField.focus();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function creamyModalResetAddCardPositionFinal() {
+  creamyModalResetScrollFinal();
+  creamyModalFocusTopFieldFinal();
+  creamyModalResetScrollFinal();
+
+  /*
+    開 modal 時 DOM / editor toolbar 可能會分幾輪 render。
+    所以要補幾次，避免 rich editor 初始化後自動 scroll 去答案區。
+  */
+  requestAnimationFrame(() => {
+    creamyModalResetScrollFinal();
+    creamyModalFocusTopFieldFinal();
+
+    requestAnimationFrame(() => {
+      creamyModalResetScrollFinal();
+      creamyModalFocusTopFieldFinal();
+    });
+  });
+
+  setTimeout(() => {
+    creamyModalResetScrollFinal();
+    creamyModalFocusTopFieldFinal();
+  }, 80);
+
+  setTimeout(() => {
+    creamyModalResetScrollFinal();
+    creamyModalFocusTopFieldFinal();
+  }, 180);
+
+  setTimeout(() => {
+    creamyModalResetScrollFinal();
+  }, 360);
+}
+
+
+/* ---------- detect add-card modal ---------- */
+
+function creamyModalIsAddModeFinal() {
+  const modal =
+    document.getElementById("noteModal") ||
+    els?.noteModal;
+
+  if (!modal) return false;
+
+  const titleText = (
+    modal.querySelector("h1, h2, h3, .modal-title")?.textContent || ""
+  ).trim();
+
+  if (
+    titleText.includes("新增") ||
+    titleText.toLowerCase().includes("add")
+  ) {
+    return true;
+  }
+
+  /*
+    如果原 app 有目前編輯 id，也可以用呢啲變數判斷。
+    不同版本命名可能不同，所以逐個安全檢查。
+  */
+  if (
+    typeof editingNoteId !== "undefined" &&
+    !editingNoteId
+  ) {
+    return true;
+  }
+
+  if (
+    typeof currentEditingNoteId !== "undefined" &&
+    !currentEditingNoteId
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+
+/* ---------- wrap openModal ---------- */
+
+if (!window.__creamyModalBaseOpenModalFinal && typeof openModal === "function") {
+  window.__creamyModalBaseOpenModalFinal = openModal;
+
+  openModal = function(...args) {
+    const result = window.__creamyModalBaseOpenModalFinal.apply(this, args);
+
+    /*
+      openModal(null, ...) 通常係新增卡片。
+      openModal(noteId, ...) 通常係編輯。
+    */
+    const firstArg = args[0];
+    const looksLikeAdd =
+      firstArg === null ||
+      firstArg === undefined ||
+      firstArg === "";
+
+    if (looksLikeAdd) {
+      creamyModalResetAddCardPositionFinal();
+    }
+
+    return result;
+  };
+}
+
+
+/* ---------- catch button click opening add modal ---------- */
+
+function bindCreamyModalScrollHotfixFinal() {
+  if (window.__creamyModalScrollHotfixBound) return;
+  window.__creamyModalScrollHotfixBound = true;
+
+  /*
+    捕捉新增卡片按鈕。
+    因為有些 onclick 會直接 openModal，這裡喺 click 後補 reset。
+  */
+  document.addEventListener("click", event => {
+    const addButton = event.target.closest(`
+      #addNoteBtn,
+      #addNoteFromNotesBtn,
+      [onclick*="openModal(null"],
+      [onclick*="openModal(undefined"],
+      [onclick*="新增卡片"]
+    `);
+
+    if (!addButton) return;
+
+    setTimeout(() => {
+      creamyModalResetAddCardPositionFinal();
+    }, 0);
+
+    setTimeout(() => {
+      creamyModalResetAddCardPositionFinal();
+    }, 120);
+  }, true);
+
+  /*
+    監聽 noteModal 由 hidden -> visible。
+    如果判斷為新增模式，打開後即刻 reset。
+  */
+  const modal =
+    document.getElementById("noteModal") ||
+    els?.noteModal;
+
+  if (modal && window.MutationObserver) {
+    const observer = new MutationObserver(() => {
+      if (modal.classList.contains("hidden")) return;
+      if (!creamyModalIsAddModeFinal()) return;
+
+      creamyModalResetAddCardPositionFinal();
+    });
+
+    observer.observe(modal, {
+      attributes: true,
+      attributeFilter: ["class", "style", "open"]
+    });
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  creamyFinalWhenReady(() => {
+    bindCreamyModalScrollHotfixFinal();
+  });
+});
+
+
+/* ---------- expose ---------- */
+
+window.creamyModalResetAddCardPositionFinal = creamyModalResetAddCardPositionFinal;
+window.creamyModalResetScrollFinal = creamyModalResetScrollFinal;
+
+/* =========================================================
+   HOTFIX C:
+   Study preview right-click menu + study importance/difficulty
+   Compatible with current appState.notes + data-study-preview-note
+   貼到 script.js 最底部
+   ========================================================= */
+
+(function () {
+  if (window.__creamyStudyPreviewMetaMenuV2) return;
+  window.__creamyStudyPreviewMetaMenuV2 = true;
+
+  /* ---------- value helpers ---------- */
+
+  function creamyMetaImportanceLabel(value) {
+    return getImportanceLabel(value || "medium");
+  }
+
+  function creamyMetaDifficultyLabel(value) {
+    return getDifficultyLabel(value || "medium");
+  }
+
+  function creamyMetaFindNote(noteId) {
+    return appState?.notes?.find(note => String(note.id) === String(noteId)) || null;
+  }
+
+  function creamyMetaCurrentNote() {
+    if (!studyState?.active) return null;
+    return studyState.notes?.[studyState.index] || null;
+  }
+
+  function creamyMetaSaveAndRefresh(message = "卡片設定已更新") {
+    creamyFinalSave(message);
+
+    if (typeof playSound === "function") {
+      playSound("preview");
+    }
+
+    if (typeof renderStudyMode === "function" && studyState?.active) {
+      renderStudyMode();
+    }
+
+    if (typeof renderNotes === "function") {
+      renderNotes();
+    }
+  }
+
+  function creamyMetaDeckOptionsHtml(currentDeckId) {
+    return appState.decks.map(deck => {
+      const selected = deck.id === currentDeckId ? "selected" : "";
+      return `<option value="${escapeAttr(deck.id)}" ${selected}>${escapeHtml(deck.name)}</option>`;
+    }).join("");
+  }
+
+  function creamyMetaImportanceOptionsHtml(current) {
+    return `
+      <option value="high" ${current === "high" ? "selected" : ""}>高</option>
+      <option value="medium" ${current === "medium" ? "selected" : ""}>中</option>
+      <option value="low" ${current === "low" ? "selected" : ""}>低</option>
+    `;
+  }
+
+  function creamyMetaDifficultyOptionsHtml(current) {
+    return `
+      <option value="hard" ${current === "hard" ? "selected" : ""}>困難</option>
+      <option value="medium" ${current === "medium" ? "selected" : ""}>中等</option>
+      <option value="easy" ${current === "easy" ? "selected" : ""}>容易</option>
+    `;
+  }
+
+  function creamyMetaStageOptionsHtml(currentStage) {
+    return CURVE_DAYS.map((days, idx) => {
+      const selected = Number(currentStage || 0) === idx ? "selected" : "";
+      return `<option value="${idx}" ${selected}>${escapeHtml(getCurveStageLabel(idx))}</option>`;
+    }).join("");
+  }
+
+  /* ---------- note operations ---------- */
+
+  function creamyMetaMoveNote(noteId, deckId) {
+    const note = creamyMetaFindNote(noteId);
+    const deck = getDeck(deckId);
+
+    if (!note || !deck) return;
+
+    note.deckId = deck.id;
+    note.subject = deck.name;
+    note.updatedAt = todayStr();
+
+    creamyMetaSaveAndRefresh("已移動卡片");
+    showToast("已移動卡片", deck.name, "success");
+  }
+
+  function creamyMetaDuplicateNote(noteId) {
+    const note = creamyMetaFindNote(noteId);
+    if (!note) return;
+
+    const clone = structuredClone ? structuredClone(note) : JSON.parse(JSON.stringify(note));
+
+    clone.id = uid("note");
+    clone.createdAt = todayStr();
+    clone.updatedAt = todayStr();
+    clone.lastCompletedDate = "";
+    clone.lastReviewResult = "";
+    clone.reviewHistory = Array.isArray(clone.reviewHistory) ? [...clone.reviewHistory] : [];
+
+    appState.notes.unshift(clone);
+
+    /*
+      如果目前在學習模式，也把複製卡加入目前 queue 的下一張。
+    */
+    if (studyState?.active) {
+      const insertAt = Math.min(studyState.index + 1, studyState.notes.length);
+      studyState.notes.splice(insertAt, 0, clone);
+      studyState.total = studyState.notes.length;
+    }
+
+    creamyMetaSaveAndRefresh("已複製卡片");
+    showToast("已複製卡片", getPlainPreviewFromHtml(clone.questionHtml, 18), "success");
+  }
+
+  function creamyMetaDeleteNote(noteId) {
+    const note = creamyMetaFindNote(noteId);
+    if (!note) return;
+
+    const ok = window.confirm(`確定要刪除這張卡片嗎？\n\n${getPlainPreviewFromHtml(note.questionHtml, 40)}`);
+    if (!ok) return;
+
+    appState.notes = appState.notes.filter(n => n.id !== noteId);
+
+    if (studyState?.active) {
+      studyState.notes = studyState.notes.filter(n => n.id !== noteId);
+      studyState.total = studyState.notes.length;
+
+      if (studyState.index >= studyState.notes.length) {
+        studyState.index = Math.max(0, studyState.notes.length - 1);
+      }
+    }
+
+    creamyFinalSave("卡片已刪除");
+
+    if (studyState?.active && studyState.notes.length) {
+      renderStudyMode();
+    } else if (studyState?.active) {
+      renderStudyComplete();
+    }
+
+    renderNotes();
+    showToast("卡片已刪除", "", "warn");
+  }
+
+  function creamyMetaUpdateImportance(noteId, value) {
+    const note = creamyMetaFindNote(noteId);
+    if (!note) return;
+
+    note.importance = value;
+    note.updatedAt = todayStr();
+
+    creamyMetaSaveAndRefresh("重要性已更新");
+    showToast("重要性已更新", creamyMetaImportanceLabel(value), "success");
+  }
+
+  function creamyMetaUpdateDifficulty(noteId, value) {
+    const note = creamyMetaFindNote(noteId);
+    if (!note) return;
+
+    note.difficulty = value;
+    note.updatedAt = todayStr();
+
+    creamyMetaSaveAndRefresh("難度已更新");
+    showToast("難度已更新", creamyMetaDifficultyLabel(value), "success");
+  }
+
+  function creamyMetaUpdateStage(noteId, value) {
+    updateCurveStage(noteId, value);
+  }
+
+  function creamyMetaUpdateNextReviewDate(noteId) {
+    const note = creamyMetaFindNote(noteId);
+    if (!note) return;
+
+    const value = window.prompt(
+      "請輸入下次複習日期：\n格式：YYYY-MM-DD",
+      note.nextReviewDate || todayStr()
+    );
+
+    if (value === null) return;
+
+    const trimmed = value.trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      showToast("日期格式不正確", "請使用 YYYY-MM-DD，例如 2026-05-17", "error");
+      return;
+    }
+
+    note.scheduleMode = "manual";
+    note.nextReviewDate = trimmed;
+    note.updatedAt = todayStr();
+
+    note.reviewHistory ||= [];
+    note.reviewHistory.push({
+      date: todayStr(),
+      action: "manual-next-review",
+      reviewStage: note.reviewStage,
+      nextReviewDate: note.nextReviewDate
+    });
+
+    creamyMetaSaveAndRefresh("下次複習日期已更新");
+    showToast("下次複習日期已更新", formatDisplayDate(trimmed), "success");
+  }
+
+  /* ---------- upgrade existing right-click note menu ---------- */
+
+  window.openNoteActionMenuFinal = function (event, noteId) {
+    const note = creamyMetaFindNote(noteId);
+    if (!note) return;
+
+    showContextMenuFinal(event, [
+      {
+        label: "開始複習",
+        sound: "remembered",
+        onClick: () => openCardDirectStudyFinal(noteId)
+      },
+      {
+        label: "編輯",
+        onClick: () => openEditModal(noteId)
+      },
+      {
+        label: "移動到",
+        type: "select",
+        value: note.deckId,
+        options: creamyMetaDeckOptionsHtml(note.deckId),
+        onChange: value => creamyMetaMoveNote(noteId, value)
+      },
+      {
+        label: "複製",
+        sound: "insert",
+        onClick: () => creamyMetaDuplicateNote(noteId)
+      },
+      {
+        label: "刪除",
+        danger: true,
+        sound: "forgot",
+        onClick: () => creamyMetaDeleteNote(noteId)
+      },
+
+      { type: "separator" },
+
+      {
+        label: note.starred ? "取消標星" : "標星",
+        onClick: () => toggleStar(noteId)
+      },
+      {
+        label: "重要性",
+        type: "select",
+        value: note.importance || "medium",
+        options: creamyMetaImportanceOptionsHtml(note.importance || "medium"),
+        onChange: value => creamyMetaUpdateImportance(noteId, value)
+      },
+      {
+        label: "難度",
+        type: "select",
+        value: note.difficulty || "medium",
+        options: creamyMetaDifficultyOptionsHtml(note.difficulty || "medium"),
+        onChange: value => creamyMetaUpdateDifficulty(noteId, value)
+      },
+      {
+        label: "學習階段",
+        type: "select",
+        value: String(note.reviewStage || 0),
+        options: creamyMetaStageOptionsHtml(note.reviewStage || 0),
+        onChange: value => creamyMetaUpdateStage(noteId, value)
+      },
+      {
+        label: "下次複習時間",
+        onClick: () => creamyMetaUpdateNextReviewDate(noteId)
+      }
+    ]);
+  };
+
+  /* ---------- right click on study preview rail ---------- */
+
+  document.addEventListener("contextmenu", event => {
+    const previewCard = event.target.closest("[data-study-preview-note]");
+    if (!previewCard) return;
+
+    const noteId = previewCard.dataset.studyPreviewNote;
+    if (!noteId) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    window.openNoteActionMenuFinal(event, noteId);
+  }, true);
+
+  /* ---------- compact importance / difficulty in study mode ---------- */
+
+  function creamyMetaBuildStudyQuickControls(note) {
+    return `
+      <div id="studyQuickMetaBar" class="study-quick-meta-v2" data-note-id="${escapeAttr(note.id)}">
+        <label>
+          <span>重要性</span>
+          <select data-study-quick-field="importance">
+            ${creamyMetaImportanceOptionsHtml(note.importance || "medium")}
+          </select>
+        </label>
+
+        <label>
+          <span>難度</span>
+          <select data-study-quick-field="difficulty">
+            ${creamyMetaDifficultyOptionsHtml(note.difficulty || "medium")}
+          </select>
+        </label>
+      </div>
+    `;
+  }
+
+  function creamyMetaInjectStudyQuickControls() {
+    if (!studyState?.active) return;
+
+    const note = creamyMetaCurrentNote();
+    if (!note) return;
+
+    const old = document.getElementById("studyQuickMetaBar");
+    if (old) old.remove();
+
+    /*
+      你現有學習模式有 .study-meta-row，放在 badge 同一行最自然、不佔位。
+    */
+    const metaRow = document.querySelector(".study-meta-row");
+
+    if (metaRow) {
+      metaRow.insertAdjacentHTML("beforeend", creamyMetaBuildStudyQuickControls(note));
+      return;
+    }
+
+    /*
+      fallback：放在 studyStage 最上方。
+    */
+    const stage = document.getElementById("studyStage");
+    if (stage) {
+      stage.insertAdjacentHTML("afterbegin", creamyMetaBuildStudyQuickControls(note));
+    }
+  }
+
+  document.addEventListener("change", event => {
+    const select = event.target.closest("[data-study-quick-field]");
+    if (!select) return;
+
+    const bar = select.closest("#studyQuickMetaBar");
+    if (!bar) return;
+
+    const noteId = bar.dataset.noteId;
+    const field = select.dataset.studyQuickField;
+    const value = select.value;
+
+    if (field === "importance") {
+      creamyMetaUpdateImportance(noteId, value);
+      return;
+    }
+
+    if (field === "difficulty") {
+      creamyMetaUpdateDifficulty(noteId, value);
+    }
+  }, true);
+
+  /* ---------- wrap renderStudyMode again safely ---------- */
+
+  if (!window.__creamyMetaBaseRenderStudyModeV2) {
+    window.__creamyMetaBaseRenderStudyModeV2 = renderStudyMode;
+  }
+
+  renderStudyMode = async function (...args) {
+    const result = await window.__creamyMetaBaseRenderStudyModeV2.apply(this, args);
+
+    requestAnimationFrame(() => {
+      creamyMetaInjectStudyQuickControls();
+    });
+
+    return result;
+  };
+
+  /*
+    如果現在已經在 study mode，立即補一次。
+  */
+  creamyFinalWhenReady(() => {
+    if (studyState?.active) {
+      creamyMetaInjectStudyQuickControls();
+    }
+  });
+
+  /* ---------- expose ---------- */
+
+  window.creamyMetaInjectStudyQuickControls = creamyMetaInjectStudyQuickControls;
+})();
+
+/* =========================================================
+   HOTFIX D:
+   More stable highlight for rich editors and study inline edit
+   Fix list / numbered list / pinpoint selection highlight issues
+   貼到 script.js 最底部
+   ========================================================= */
+
+(function () {
+  if (window.__creamyHighlightHotfixD) return;
+  window.__creamyHighlightHotfixD = true;
+
+  function creamyHighlightGetEditor(editorId) {
+    return document.getElementById(editorId);
+  }
+
+  function creamyHighlightSaveSelection() {
+    const selection = window.getSelection();
+
+    if (!selection || selection.rangeCount === 0) {
+      return null;
+    }
+
+    return selection.getRangeAt(0).cloneRange();
+  }
+
+  function creamyHighlightRestoreSelection(range) {
+    if (!range) return false;
+
+    const selection = window.getSelection();
+    if (!selection) return false;
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    return true;
+  }
+
+  function creamyHighlightColorToSafe(color) {
+    const fallback = "#ffef76";
+    const value = String(color || "").trim();
+
+    if (!value) return fallback;
+
+    /*
+      允許 hex / rgb / rgba / hsl / hsla / 常見英文色名。
+      你的 toolbar 本身多數是 hex。
+    */
+    if (
+      /^#[0-9a-f]{3,8}$/i.test(value) ||
+      /^rgba?\(/i.test(value) ||
+      /^hsla?\(/i.test(value) ||
+      /^[a-z]+$/i.test(value)
+    ) {
+      return value;
+    }
+
+    return fallback;
+  }
+
+  function creamyHighlightNormalizeInRoot(root, colorHint = "") {
+    if (!root) return;
+
+    const color = creamyHighlightColorToSafe(colorHint || "#ffef76");
+
+    /*
+      1. 把瀏覽器 execCommand 產生的 background-color span / font 轉成 highlight-chip。
+      2. 保留 list 結構，不 unwrap li / ol / ul。
+    */
+    root.querySelectorAll("span, font, mark").forEach(el => {
+      const bg =
+        el.style?.backgroundColor ||
+        el.getAttribute("data-highlight") ||
+        el.getAttribute("bgcolor") ||
+        "";
+
+      const hasBg = !!bg && !/transparent/i.test(bg);
+      const already = el.matches(".highlight-chip, [data-highlight], mark");
+
+      if (!hasBg && !already) return;
+
+      const finalColor = creamyHighlightColorToSafe(bg || color);
+
+      /*
+        font 標籤不太適合長期留著，改成 span。
+      */
+      if (el.tagName === "FONT") {
+        const span = document.createElement("span");
+        span.innerHTML = el.innerHTML;
+        span.className = "highlight-chip";
+        span.dataset.highlight = finalColor;
+        span.style.backgroundColor = finalColor;
+        el.replaceWith(span);
+        return;
+      }
+
+      el.classList.add("highlight-chip");
+      el.dataset.highlight = finalColor;
+      el.style.backgroundColor = finalColor;
+
+      /*
+        避免 execCommand 留下奇怪 inline style。
+        但保留 color / font-weight / underline 等，由 sanitizeRichHtml 再清。
+      */
+    });
+
+    /*
+      清掉空 highlight span，避免留下你截圖那種黃色直線空 span。
+      如果 span 裡只有 br / 空白，就 unwrap 或刪除。
+    */
+    root.querySelectorAll("span.highlight-chip[data-highlight]").forEach(span => {
+      const hasImage = !!span.querySelector("img");
+      const text = (span.textContent || "").replace(/\u200B/g, "").trim();
+
+      if (!text && !hasImage) {
+        span.remove();
+      }
+    });
+
+    if (typeof cleanupHighlightSpans === "function") {
+      cleanupHighlightSpans(root);
+    }
+  }
+
+  function creamyHighlightExec(editorId, color) {
+    const editor = creamyHighlightGetEditor(editorId);
+    if (!editor) return;
+
+    const safeColor = creamyHighlightColorToSafe(color);
+    const savedRange = creamyHighlightSaveSelection();
+
+    editor.focus();
+
+    if (savedRange) {
+      creamyHighlightRestoreSelection(savedRange);
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      showToast?.("請先選取文字", "選取要標記的文字後再按 highlight。", "warn");
+      return;
+    }
+
+    /*
+      關鍵：
+      styleWithCSS = true 會讓 backColor/hiliteColor 較穩定產生 span style，
+      對 ol/li、bullet、跨行 selection 比手動 extractContents 穩定得多。
+    */
+    try {
+      document.execCommand("styleWithCSS", false, true);
+    } catch {
+      // ignore
+    }
+
+    /*
+      Chrome / Edge / Safari 多數吃 backColor。
+      Firefox 對 hiliteColor 較好。
+      兩個都試，但成功一個就夠。
+    */
+    let ok = false;
+
+    try {
+      ok = document.execCommand("backColor", false, safeColor);
+    } catch {
+      ok = false;
+    }
+
+    if (!ok) {
+      try {
+        ok = document.execCommand("hiliteColor", false, safeColor);
+      } catch {
+        ok = false;
+      }
+    }
+
+    /*
+      fallback：只在原生 command 完全失敗時用原本包 span。
+      但避免跨多個 block/list 時硬包，降低破 DOM 風險。
+    */
+    if (!ok) {
+      try {
+        const range = selection.getRangeAt(0);
+        const span = document.createElement("span");
+        span.className = "highlight-chip";
+        span.dataset.highlight = safeColor;
+        span.style.backgroundColor = safeColor;
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+      } catch {
+        showToast?.("Highlight 失敗", "可以試試只選取同一行文字。", "error");
+      }
+    }
+
+    creamyHighlightNormalizeInRoot(editor, safeColor);
+
+    /*
+      避免藍色 selection 殘留太礙眼。
+      這個會令使用者完成 highlight 後取消選取。
+    */
+    try {
+      selection.removeAllRanges();
+    } catch {
+      // ignore
+    }
+  }
+
+  function creamyHighlightClear(editorId) {
+    const editor = creamyHighlightGetEditor(editorId);
+    if (!editor) return;
+
+    const savedRange = creamyHighlightSaveSelection();
+
+    editor.focus();
+
+    if (savedRange) {
+      creamyHighlightRestoreSelection(savedRange);
+    }
+
+    const selection = window.getSelection();
+
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      showToast?.("請先選取文字", "選取要清除 highlight 的文字。", "warn");
+      return;
+    }
+
+    /*
+      原生 removeFormat 對 list / numbered list 比手動 unwrap 穩。
+      但它可能同時清 bold/color，所以這裡只作穩定優先。
+    */
+    try {
+      document.execCommand("removeFormat", false, null);
+    } catch {
+      // fallback below
+    }
+
+    /*
+      補救：如果 selection 附近仍有 highlight-chip，就只清 background。
+    */
+    try {
+      const range = selection.rangeCount ? selection.getRangeAt(0) : null;
+      let root = range?.commonAncestorContainer || editor;
+
+      if (root.nodeType === Node.TEXT_NODE) {
+        root = root.parentElement;
+      }
+
+      const scope = root.closest?.(".rich-editor, .study-content") || editor;
+
+      scope.querySelectorAll("span.highlight-chip, mark, [data-highlight]").forEach(node => {
+        try {
+          if (!range || range.intersectsNode(node)) {
+            node.style.backgroundColor = "";
+            node.removeAttribute("data-highlight");
+            node.classList.remove("highlight-chip");
+
+            /*
+              如果只剩普通 span，攤平它。
+            */
+            if (
+              node.tagName === "SPAN" &&
+              !node.getAttribute("style") &&
+              !node.className &&
+              !node.attributes.length
+            ) {
+              unwrapNode(node);
+            }
+          }
+        } catch {
+          // ignore individual node
+        }
+      });
+    } catch {
+      // ignore
+    }
+
+    creamyHighlightNormalizeInRoot(editor);
+
+    try {
+      selection.removeAllRanges();
+    } catch {
+      // ignore
+    }
+  }
+
+  /*
+    覆寫原本 function。
+    你原本 toolbar 已經呼叫 applyCustomHighlight / clearCustomHighlight，
+    所以不用改 HTML。
+  */
+  window.applyCustomHighlight = function (editorId, color) {
+    creamyHighlightExec(editorId, color);
+  };
+
+  window.clearCustomHighlight = function (editorId) {
+    creamyHighlightClear(editorId);
+  };
+
+  /*
+    因為原本 function 是 function declaration，
+    在同一 scope 內按鈕 listener 可能引用 lexical binding。
+    這裡再覆寫同名變數，確保舊 listener 也吃到新 function。
+  */
+  try {
+    applyCustomHighlight = window.applyCustomHighlight;
+    clearCustomHighlight = window.clearCustomHighlight;
+  } catch {
+    // ignore
+  }
+
+  /*
+    額外：如果使用者用瀏覽器快捷或 paste 後有 background-color，
+    blur 時也幫忙 normalize。
+  */
+  document.addEventListener("blur", event => {
+    const editor = event.target.closest?.(".rich-editor, .study-content");
+    if (!editor) return;
+
+    creamyHighlightNormalizeInRoot(editor);
+  }, true);
+
+})();
+
+/* =========================================================
+   常漏點 G1
+   目的：
+   - 單一常漏點系統，取代 C3 / F1 / F2
+   - panel 固定在 #studyMissedPointAnchor，不 fixed
+   - panel 初始隱藏
+   - 左鍵 panel item 一下跳正文
+   - 右鍵 panel item / 正文 marker 開 menu
+   - 顯示/隱藏按鈕穩定
+   ========================================================= */
+
+(function () {
+  if (window.__creamyMissedPointG1) return;
+  window.__creamyMissedPointG1 = true;
+
+  const ZONE_ID = "studyMissedPointZone";
+  const MENU_ID = "missedPointContextMenu";
+  const MARKER_CLASS = "missed-point-block";
+
+  const ui = {
+    openByNoteId: Object.create(null),
+    menuNoteId: "",
+    menuPointId: "",
+    jumpLockUntil: 0,
+    jumpLockPointId: ""
+  };
+
+  /* ---------- basic helpers ---------- */
+
+  function g1Ready(callback) {
+    if (typeof creamyFinalWhenReady === "function") {
+      creamyFinalWhenReady(callback);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      try {
+        if (typeof appState !== "undefined" && appState?.notes && els?.studyStage) {
+          clearInterval(timer);
+          callback();
+        }
+      } catch {
+        // wait
+      }
+    }, 50);
+  }
+
+  function g1EscapeHtml(value = "") {
+    return typeof escapeHtml === "function"
+      ? escapeHtml(value)
+      : String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+  }
+
+  function g1EscapeAttr(value = "") {
+    return typeof escapeAttr === "function"
+      ? escapeAttr(value)
+      : g1EscapeHtml(value).replaceAll("`", "&#096;");
+  }
+
+  function g1CssEscape(value = "") {
+    if (window.CSS && typeof CSS.escape === "function") {
+      return CSS.escape(String(value));
+    }
+
+    return String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  function g1Today() {
+    return typeof todayStr === "function"
+      ? todayStr()
+      : new Date().toISOString().slice(0, 10);
+  }
+
+  function g1StripHtml(html = "") {
+    return typeof stripHtml === "function"
+      ? stripHtml(html)
+      : String(html).replace(/<[^>]*>/g, "").trim();
+  }
+
+  function g1Uid() {
+    return typeof uid === "function"
+      ? uid("mp")
+      : `mp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function g1Save(message = "常漏點已更新") {
+    if (typeof requestSave === "function") {
+      requestSave(message);
+      return;
+    }
+
+    if (typeof creamyFinalSave === "function") {
+      creamyFinalSave(message);
+      return;
+    }
+
+    if (typeof saveStateNow === "function") {
+      saveStateNow(appState, message);
+    }
+  }
+
+  function g1Sound(type = "preview") {
+    if (typeof playSound === "function") {
+      playSound(type);
+    }
+  }
+
+  function g1Toast(title, body = "", type = "info") {
+    if (typeof showToast === "function") {
+      showToast(title, body, type);
+    }
+  }
+
+  /* ---------- note helpers ---------- */
+
+  function g1CurrentStudyNote() {
+    try {
+      if (!studyState?.active) return null;
+      return studyState.notes?.[studyState.index] || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function g1FindNote(noteId) {
+    try {
+      return appState?.notes?.find(note => String(note.id) === String(noteId)) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function g1EnsurePoints(note) {
+    if (!note) return [];
+    if (!Array.isArray(note.missedPoints)) note.missedPoints = [];
+    return note.missedPoints;
+  }
+
+  function g1FindPoint(note, pointId) {
+    return g1EnsurePoints(note).find(point => String(point.id) === String(pointId)) || null;
+  }
+
+  function g1FindOrCreatePoint(note, pointId, fallbackText = "") {
+    if (!note || !pointId) return null;
+
+    let point = g1FindPoint(note, pointId);
+
+    if (!point) {
+      point = {
+        id: pointId,
+        text: fallbackText || "未命名常漏點",
+        count: 0,
+        active: false,
+        side: "answer",
+        createdAt: g1Today(),
+        updatedAt: g1Today()
+      };
+
+      g1EnsurePoints(note).push(point);
+    }
+
+    return point;
+  }
+
+  function g1GetEditableNote() {
+    const modal = document.getElementById("noteModal");
+    const modalOpen = modal && !modal.classList.contains("hidden");
+
+    if (modalOpen) {
+      const noteId = document.getElementById("noteId")?.value || "";
+      if (noteId) return g1FindNote(noteId);
+      return null;
+    }
+
+    return g1CurrentStudyNote();
+  }
+
+  function g1GetNoteFromMarker(marker) {
+    if (marker?.closest?.("#studyModeView")) {
+      return g1CurrentStudyNote();
+    }
+
+    return g1GetEditableNote() || g1CurrentStudyNote();
+  }
+
+  /* ---------- marker helpers ---------- */
+
+  function g1PointSelector(pointId) {
+    return `[data-missed-point-id="${g1CssEscape(pointId)}"]`;
+  }
+
+  function g1MarkerText(marker) {
+    return String(marker?.textContent || "")
+      .replace(/^\s*(⚠️|🔥|💧)\s*/u, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function g1NormalizeMarkers(root = document, note = null) {
+    const targetNote = note || g1CurrentStudyNote() || g1GetEditableNote();
+    if (!targetNote) return;
+
+    const activeMap = new Map(
+      g1EnsurePoints(targetNote).map(point => [String(point.id), !!point.active])
+    );
+
+    root.querySelectorAll("[data-missed-point-id]").forEach(marker => {
+      marker.classList.add(MARKER_CLASS);
+
+      const pointId = String(marker.dataset.missedPointId || "");
+
+      marker.classList.toggle("is-active", !!activeMap.get(pointId));
+
+      const first = marker.firstChild;
+
+      if (first && first.nodeType === Node.TEXT_NODE) {
+        first.textContent = first.textContent.replace(/^\s*(⚠️|🔥|💧)\s*/u, "");
+      }
+    });
+  }
+
+  function g1FindLiveMarker(pointId) {
+    if (!pointId) return null;
+
+    const scope =
+      document.getElementById("studyModeView") ||
+      document.getElementById("studyStage") ||
+      document;
+
+    const markers = Array.from(scope.querySelectorAll(g1PointSelector(pointId)))
+      .filter(el => !el.closest(`#${ZONE_ID}`))
+      .filter(el => !el.closest(`#${MENU_ID}`));
+
+    const visible = markers.find(el => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden"
+      );
+    });
+
+    return visible || markers[0] || null;
+  }
+
+  function g1FindScrollableParent(el) {
+    let node = el?.parentElement || null;
+
+    while (node && node !== document.body && node !== document.documentElement) {
+      const style = window.getComputedStyle(node);
+      const overflowY = style.overflowY;
+
+      if (
+        /(auto|scroll|overlay)/.test(overflowY) &&
+        node.scrollHeight > node.clientHeight + 8
+      ) {
+        return node;
+      }
+
+      node = node.parentElement;
+    }
+
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function g1JumpToPoint(pointId, retry = 0) {
+    if (!pointId) return false;
+
+    const now = Date.now();
+
+    if (ui.jumpLockPointId === String(pointId) && now < ui.jumpLockUntil) {
+      return true;
+    }
+
+    ui.jumpLockPointId = String(pointId);
+    ui.jumpLockUntil = now + 220;
+
+    const marker = g1FindLiveMarker(pointId);
+
+    if (!marker) {
+      if (retry < 4) {
+        g1RunSoon();
+
+        setTimeout(() => {
+          g1JumpToPoint(pointId, retry + 1);
+        }, 90 + retry * 100);
+      }
+
+      return false;
+    }
+
+    const scroller = g1FindScrollableParent(marker);
+
+    if (
+      scroller &&
+      scroller !== document.documentElement &&
+      scroller !== document.body
+    ) {
+      const markerRect = marker.getBoundingClientRect();
+      const scrollerRect = scroller.getBoundingClientRect();
+
+      const targetTop =
+        scroller.scrollTop +
+        markerRect.top -
+        scrollerRect.top -
+        scrollerRect.height / 2 +
+        markerRect.height / 2;
+
+      scroller.scrollTo({
+        top: Math.max(0, targetTop),
+        behavior: "auto"
+      });
+    } else {
+      marker.scrollIntoView({
+        behavior: "auto",
+        block: "center",
+        inline: "nearest"
+      });
+    }
+
+    marker.classList.remove("missed-point-jump-focus");
+    void marker.offsetWidth;
+    marker.classList.add("missed-point-jump-focus");
+
+    setTimeout(() => {
+      marker.classList.remove("missed-point-jump-focus");
+    }, 1200);
+
+    g1CloseMenu();
+    return true;
+  }
+
+  /* ---------- add missed point from selection ---------- */
+
+  function g1GetEditorContextFromElement(el) {
+    const editor = el?.closest?.(".rich-editor, .study-content");
+    if (!editor) return null;
+
+    let side = "answer";
+
+    if (
+      editor.id === "questionEditor" ||
+      editor.id === "studyQuestion" ||
+      editor.id === "studyQuestionSplit"
+    ) {
+      side = "question";
+    }
+
+    return { editor, side };
+  }
+
+  function g1GetFocusedEditorContext() {
+    const selection = window.getSelection();
+    let node = selection?.rangeCount ? selection.getRangeAt(0).commonAncestorContainer : null;
+
+    if (node?.nodeType === Node.TEXT_NODE) {
+      node = node.parentElement;
+    }
+
+    let context = g1GetEditorContextFromElement(node);
+
+    if (context) return context;
+
+    context = g1GetEditorContextFromElement(document.activeElement);
+
+    if (context) return context;
+
+    try {
+      if (typeof activeEditorId !== "undefined" && activeEditorId) {
+        context = g1GetEditorContextFromElement(document.getElementById(activeEditorId));
+        if (context) return context;
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
+  }
+
+  function g1SyncNoteHtmlFromEditors(note) {
+    if (!note) return;
+
+    const modal = document.getElementById("noteModal");
+    const modalOpen = modal && !modal.classList.contains("hidden");
+
+    if (modalOpen) {
+      const q = document.getElementById("questionEditor");
+      const a = document.getElementById("answerEditor");
+
+      if (q) {
+        note.questionHtml =
+          typeof getEditorHtml === "function" ? getEditorHtml(q) : q.innerHTML;
+      }
+
+      if (a) {
+        note.answerHtml =
+          typeof getEditorHtml === "function" ? getEditorHtml(a) : a.innerHTML;
+      }
+
+      note.question = g1StripHtml(note.questionHtml || "");
+      note.answer = g1StripHtml(note.answerHtml || "");
+      return;
+    }
+
+    try {
+      if (studyState?.active && typeof studyInlineEditing !== "undefined" && studyInlineEditing) {
+        const q = studyState.preferences.viewMode === "split"
+          ? document.getElementById("studyQuestionSplit")
+          : document.getElementById("studyQuestion");
+
+        const a = studyState.preferences.viewMode === "split"
+          ? document.getElementById("studyAnswerSplit")
+          : document.getElementById("studyAnswer");
+
+        if (q) {
+          note.questionHtml =
+            typeof sanitizeRichHtml === "function" ? sanitizeRichHtml(q.innerHTML || "") : q.innerHTML;
+        }
+
+        if (a) {
+          note.answerHtml =
+            typeof sanitizeRichHtml === "function" ? sanitizeRichHtml(a.innerHTML || "") : a.innerHTML;
+        }
+
+        note.question = g1StripHtml(note.questionHtml || "");
+        note.answer = g1StripHtml(note.answerHtml || "");
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  function g1AddFromSelection() {
+    const context = g1GetFocusedEditorContext();
+
+    if (!context) {
+      g1Toast("請先點進編輯器", "選取文字後再按「常漏」。", "warn");
+      return;
+    }
+
+const inStudyMode = !!context.editor.closest("#studyModeView");
+
+if (inStudyMode && !studyInlineEditing) {
+  g1Toast("請先按「原地編輯」", "進入編輯狀態後再標記常漏點。", "warn");
+  return;
+}
+
+    const note = g1GetEditableNote();
+
+    if (!note) {
+      g1Toast("請先儲存卡片", "新增卡片第一次建立時，請先儲存後再標常漏點。", "warn");
+      return;
+    }
+
+    const selection = window.getSelection();
+
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      g1Toast("請先選取文字", "選取要標成常漏點的內容。", "warn");
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+
+    if (!context.editor.contains(range.commonAncestorContainer)) {
+      g1Toast("請在同一個編輯器內選取", "", "warn");
+      return;
+    }
+
+    const text = String(selection.toString() || "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!text) {
+      g1Toast("選取內容沒有文字", "", "warn");
+      return;
+    }
+
+    const ancestor =
+      range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+        ? range.commonAncestorContainer.parentElement
+        : range.commonAncestorContainer;
+
+    if (ancestor?.closest?.("[data-missed-point-id]")) {
+      g1Toast("已經是常漏點", "", "info");
+      return;
+    }
+
+    const pointId = g1Uid();
+
+    const span = document.createElement("span");
+    span.className = MARKER_CLASS;
+    span.dataset.missedPointId = pointId;
+    span.dataset.missedPointSide = context.side;
+
+    try {
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      selection.removeAllRanges();
+    } catch {
+      g1Toast("標記失敗", "請盡量選取同一段文字。", "error");
+      return;
+    }
+
+    g1EnsurePoints(note).push({
+      id: pointId,
+      text: text.length > 120 ? `${text.slice(0, 120)}…` : text,
+      count: 0,
+      active: false,
+      side: context.side,
+      createdAt: g1Today(),
+      updatedAt: g1Today()
+    });
+
+    g1SyncNoteHtmlFromEditors(note);
+    note.updatedAt = g1Today();
+
+    g1NormalizeMarkers(document, note);
+    g1RenderPanel();
+    g1Save("常漏點已新增");
+    g1Sound("insert");
+    g1Toast("已新增常漏點", text.slice(0, 24), "success");
+  }
+
+  /* ---------- panel ---------- */
+
+  function g1EnsureZone() {
+    let zone = document.getElementById(ZONE_ID);
+
+    if (!zone) {
+      zone = document.createElement("div");
+      zone.id = ZONE_ID;
+      zone.className = "study-missed-point-zone";
+    }
+
+    const anchor = document.getElementById("studyMissedPointAnchor");
+
+    if (anchor && zone.parentElement !== anchor) {
+      anchor.innerHTML = "";
+      anchor.appendChild(zone);
+    }
+
+    return zone;
+  }
+
+  function g1BuildPanelHtml(note) {
+    if (!note) return "";
+
+    const points = g1EnsurePoints(note);
+    const noteId = note.id || "";
+
+    /*
+      重要：
+      初次 render 預設 hidden。
+      只有使用者按了顯示，才會 openByNoteId[noteId] = true。
+    */
+    const isOpen = ui.openByNoteId[noteId] === true;
+
+    return `
+      <div class="missed-point-panel" data-g1-panel-note="${g1EscapeAttr(noteId)}">
+        <button
+          type="button"
+          class="missed-point-toggle"
+          data-g1-toggle-panel="${g1EscapeAttr(noteId)}"
+        >
+          <span>常漏點 ${points.length}</span>
+          <small>${isOpen ? "隱藏" : "顯示"}</small>
+        </button>
+
+        <div class="missed-point-body ${isOpen ? "" : "hidden"}">
+          ${
+            points.length
+              ? points.map(point => {
+                  const active = point.active ? "is-active" : "";
+
+                  return `
+                    <div
+                      class="missed-point-item ${active}"
+                      data-g1-missed-item="${g1EscapeAttr(point.id)}"
+                      data-note-id="${g1EscapeAttr(noteId)}"
+                    >
+                      <button
+                        type="button"
+                        class="missed-point-row"
+                        data-g1-missed-row="1"
+                        data-note-id="${g1EscapeAttr(noteId)}"
+                        data-point-id="${g1EscapeAttr(point.id)}"
+                        title="左鍵跳到正文；右鍵開選單"
+                      >
+                        <span class="missed-point-text">${g1EscapeHtml(point.text || "未命名常漏點")}</span>
+                        <span class="missed-point-count">${Number(point.count || 0)}</span>
+                      </button>
+                    </div>
+                  `;
+                }).join("")
+              : `<div class="missed-point-empty">這張卡還沒有常漏點。</div>`
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  function g1RenderPanel() {
+    const note = g1CurrentStudyNote();
+    const zone = g1EnsureZone();
+
+    if (!zone) return;
+
+    if (!studyState?.active || !note) {
+      zone.innerHTML = "";
+      return;
+    }
+
+    zone.innerHTML = g1BuildPanelHtml(note);
+  }
+
+  /* ---------- context menu ---------- */
+
+  function g1EnsureMenu() {
+    let menu = document.getElementById(MENU_ID);
+
+    if (!menu) {
+      menu = document.createElement("div");
+      menu.id = MENU_ID;
+      document.body.appendChild(menu);
+    }
+
+    menu.className = "missed-point-context-menu";
+    return menu;
+  }
+
+  function g1CloseMenu() {
+    const menu = document.getElementById(MENU_ID);
+
+    if (!menu) return;
+
+    menu.classList.add("hidden");
+    menu.style.display = "none";
+    menu.innerHTML = "";
+    ui.menuNoteId = "";
+    ui.menuPointId = "";
+  }
+
+  function g1PositionMenu(menu, x, y) {
+    menu.classList.remove("hidden");
+    menu.style.display = "block";
+
+    const rect = menu.getBoundingClientRect();
+    const gap = 8;
+
+    let left = x;
+    let top = y;
+
+    if (left + rect.width + gap > window.innerWidth) {
+      left = window.innerWidth - rect.width - gap;
+    }
+
+    if (top + rect.height + gap > window.innerHeight) {
+      top = window.innerHeight - rect.height - gap;
+    }
+
+    menu.style.left = `${Math.max(gap, left)}px`;
+    menu.style.top = `${Math.max(gap, top)}px`;
+  }
+
+  function g1OpenMenu(note, point, x, y) {
+    if (!note || !point) return;
+
+    const menu = g1EnsureMenu();
+
+    ui.menuNoteId = String(note.id);
+    ui.menuPointId = String(point.id);
+
+    menu.dataset.noteId = String(note.id);
+    menu.dataset.pointId = String(point.id);
+
+    menu.innerHTML = `
+      <div class="missed-point-context-menu-title">
+        ⚠️ ${g1EscapeHtml(point.text || "常漏點")}
+      </div>
+
+      <button type="button" data-g1-menu-action="miss">
+        <span>忘了 +1</span>
+        <strong>${Number(point.count || 0) + 1}</strong>
+      </button>
+
+      <button type="button" data-g1-menu-action="clear">
+        <span>清除狀態</span>
+        <strong>一般</strong>
+      </button>
+
+      <button type="button" disabled>
+        <span>數字</span>
+        <strong>${Number(point.count || 0)}</strong>
+      </button>
+
+      <button type="button" disabled>
+        <span>狀態</span>
+        <strong>${point.active ? "最近漏過" : "一般"}</strong>
+      </button>
+
+      <div class="missed-point-context-menu-sep"></div>
+
+      <button type="button" class="cmp-danger" data-g1-menu-action="delete">
+        <span>刪除</span>
+        <strong>×</strong>
+      </button>
+    `;
+
+    g1PositionMenu(menu, x, y);
+  }
+
+  function g1OpenMenuFromRow(row, event) {
+    const note =
+      g1FindNote(row.dataset.noteId) ||
+      g1CurrentStudyNote();
+
+    const point = g1FindPoint(note, row.dataset.pointId);
+
+    if (!note || !point) return;
+
+    g1OpenMenu(note, point, event.clientX, event.clientY);
+  }
+
+  function g1OpenMenuFromMarker(marker, event) {
+    const note = g1GetNoteFromMarker(marker);
+    const pointId = marker.dataset.missedPointId || "";
+
+    if (!note || !pointId) return;
+
+    const point = g1FindOrCreatePoint(note, pointId, g1MarkerText(marker));
+
+    if (!point) return;
+
+    g1OpenMenu(note, point, event.clientX, event.clientY);
+  }
+
+  function g1ClearMarkerElement(el) {
+    if (!el) return;
+
+    const first = el.firstChild;
+
+    if (first && first.nodeType === Node.TEXT_NODE) {
+      first.textContent = first.textContent.replace(/^\s*(⚠️|🔥|💧)\s*/u, "");
+    }
+
+    el.removeAttribute("data-missed-point-id");
+    el.removeAttribute("data-missed-point-side");
+    el.classList.remove(MARKER_CLASS, "is-active", "missed-point-active");
+
+    const hasUsefulAttr =
+      el.getAttribute("class") ||
+      el.getAttribute("style") ||
+      el.getAttribute("data-highlight") ||
+      el.getAttribute("contenteditable");
+
+    if (el.tagName === "SPAN" && !hasUsefulAttr && el.parentNode) {
+      const parent = el.parentNode;
+
+      while (el.firstChild) {
+        parent.insertBefore(el.firstChild, el);
+      }
+
+      parent.removeChild(el);
+    }
+  }
+
+  function g1ClearMarkerFromHtml(html, pointId) {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html || "";
+
+    wrapper.querySelectorAll(g1PointSelector(pointId)).forEach(g1ClearMarkerElement);
+
+    return wrapper.innerHTML;
+  }
+
+  function g1DeletePoint(note, point) {
+    if (!note || !point) return;
+
+    note.missedPoints = g1EnsurePoints(note).filter(p => String(p.id) !== String(point.id));
+
+    note.questionHtml = g1ClearMarkerFromHtml(note.questionHtml || "", point.id);
+    note.answerHtml = g1ClearMarkerFromHtml(note.answerHtml || "", point.id);
+    note.question = g1StripHtml(note.questionHtml || "");
+    note.answer = g1StripHtml(note.answerHtml || "");
+    note.updatedAt = g1Today();
+
+    document.querySelectorAll(g1PointSelector(point.id)).forEach(g1ClearMarkerElement);
+  }
+
+  function g1ApplyMenuAction(action) {
+    const note =
+      g1FindNote(ui.menuNoteId) ||
+      g1CurrentStudyNote();
+
+    const point = g1FindPoint(note, ui.menuPointId);
+
+    if (!note || !point) return;
+
+    if (action === "miss") {
+      point.count = Number(point.count || 0) + 1;
+      point.active = true;
+      point.updatedAt = g1Today();
+      note.updatedAt = g1Today();
+
+      g1Sound("forgot");
+    }
+
+    if (action === "clear") {
+      point.active = false;
+      point.updatedAt = g1Today();
+      note.updatedAt = g1Today();
+
+      g1Sound("remembered");
+    }
+
+    if (action === "delete") {
+      const ok = window.confirm(`確定刪除這個常漏點嗎？\n\n${point.text || ""}`);
+      if (!ok) return;
+
+      g1DeletePoint(note, point);
+      g1Sound("forgot");
+    }
+
+    g1CloseMenu();
+    g1NormalizeMarkers(document, note);
+    g1RenderPanel();
+    g1Save("常漏點已更新");
+
+    try {
+      if (typeof renderStudyPreviewRailFinal === "function") {
+        renderStudyPreviewRailFinal();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /* ---------- toolbar ---------- */
+
+  function g1CreateToolbarButton(targetEditorId) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "missed-point-toolbar-btn tool-btn";
+    btn.textContent = "常漏";
+    btn.title = "將選取文字標為常漏點";
+    btn.dataset.g1MissedPointButton = targetEditorId || "";
+    return btn;
+  }
+
+  function g1InferToolbarEditorId(toolbar) {
+    const any =
+      toolbar.querySelector("[data-editor]") ||
+      toolbar.querySelector("[data-insert-image]");
+
+    if (any?.dataset?.editor) return any.dataset.editor;
+    if (any?.dataset?.insertImage) return any.dataset.insertImage;
+
+    if (toolbar.closest("#studyInlineEditBar")) return "study-inline";
+
+    return "";
+  }
+
+  function g1InjectToolbarButtons() {
+    document.querySelectorAll(".editor-toolbar").forEach(toolbar => {
+      if (toolbar.querySelector("[data-g1-missed-point-button]")) return;
+
+      const btn = g1CreateToolbarButton(g1InferToolbarEditorId(toolbar));
+      const clearBtn =
+        toolbar.querySelector("[data-action='clear-format']") ||
+        toolbar.querySelector("[data-study-action='clear-format']");
+
+      if (clearBtn) {
+        clearBtn.insertAdjacentElement("beforebegin", btn);
+      } else {
+        toolbar.appendChild(btn);
+      }
+    });
+
+    const studyBar = document.getElementById("studyInlineEditBar");
+
+    if (studyBar && !studyBar.querySelector("[data-g1-missed-point-button]")) {
+      const btn = g1CreateToolbarButton("study-inline");
+      const clearBtn = studyBar.querySelector("[data-study-action='clear-format']");
+
+      if (clearBtn) {
+        clearBtn.insertAdjacentElement("beforebegin", btn);
+      } else {
+        studyBar.appendChild(btn);
+      }
+    }
+  }
+
+  /* ---------- sanitize patch ---------- */
+
+  function g1PatchSanitizer() {
+    if (window.__creamyMissedPointG1SanitizerPatched) return;
+    if (typeof sanitizeRichHtml !== "function") return;
+
+    window.__creamyMissedPointG1SanitizerPatched = true;
+    window.__creamyMissedPointG1BaseSanitize = sanitizeRichHtml;
+
+    sanitizeRichHtml = function (html = "") {
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = html || "";
+
+      /*
+        先將 marker 所需資料複製到 dataset，避免 sanitizer 遺失。
+      */
+      wrapper.querySelectorAll("[data-missed-point-id]").forEach(el => {
+        el.classList.add(MARKER_CLASS);
+      });
+
+      const safe = window.__creamyMissedPointG1BaseSanitize(wrapper.innerHTML);
+
+      const after = document.createElement("div");
+      after.innerHTML = safe;
+
+      /*
+        如果原 sanitizer 已保留 data-missed-point-id，就只補 class。
+      */
+      after.querySelectorAll("[data-missed-point-id]").forEach(el => {
+        el.classList.add(MARKER_CLASS);
+      });
+
+      return after.innerHTML.trim();
+    };
+
+    try {
+      window.sanitizeRichHtml = sanitizeRichHtml;
+    } catch {
+      // ignore
+    }
+  }
+
+  /* ---------- wrap app renders ---------- */
+
+  function g1WrapFunction(name, after) {
+    try {
+      const original = eval(name);
+      if (typeof original !== "function") return;
+
+      const flag = `__creamyMissedPointG1Wrapped_${name}`;
+      if (window[flag]) return;
+
+      window[flag] = true;
+
+      const wrapped = async function (...args) {
+        const result = await original.apply(this, args);
+
+        requestAnimationFrame(after);
+        setTimeout(after, 80);
+
+        return result;
+      };
+
+      eval(`${name} = wrapped`);
+
+      try {
+        window[name] = wrapped;
+      } catch {
+        // ignore
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  function g1AfterRender() {
+    g1InjectToolbarButtons();
+    g1NormalizeMarkers();
+    g1RenderPanel();
+  }
+
+  /* ---------- events ---------- */
+
+  function g1BindEvents() {
+    if (window.__creamyMissedPointG1EventsBound) return;
+    window.__creamyMissedPointG1EventsBound = true;
+
+    /*
+      Toolbar 常漏按鈕
+    */
+    document.addEventListener("click", event => {
+      const btn = event.target.closest("[data-g1-missed-point-button]");
+
+      if (!btn) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      g1AddFromSelection();
+    }, true);
+
+    /*
+      Ctrl/Cmd + E 標常漏
+    */
+    document.addEventListener("keydown", event => {
+      const isMod = event.ctrlKey || event.metaKey;
+
+      if (!isMod || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "e") return;
+
+      const context = g1GetFocusedEditorContext();
+
+      if (!context) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      g1AddFromSelection();
+    }, true);
+
+    /*
+      Pointerdown：
+      panel row 左鍵在 pointerdown 就跳，避免 click 被其他 handler 搶。
+      顯示/隱藏也在 pointerdown 處理。
+    */
+    document.addEventListener("pointerdown", event => {
+      const toggle = event.target.closest("[data-g1-toggle-panel]");
+
+      if (toggle) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        const noteId = toggle.dataset.g1TogglePanel;
+        ui.openByNoteId[noteId] = ui.openByNoteId[noteId] !== true;
+
+        g1RenderPanel();
+        g1Sound("preview");
+        return;
+      }
+
+      const row = event.target.closest("[data-g1-missed-row]");
+
+      if (!row) return;
+
+      const isLeft = event.button === 0;
+      const isRight = event.button === 2;
+
+      if (isLeft) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        g1JumpToPoint(row.dataset.pointId || "");
+        return;
+      }
+
+      if (isRight) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        g1OpenMenuFromRow(row, event);
+      }
+    }, true);
+
+    /*
+      click 備援，但不再重複觸發。
+    */
+    document.addEventListener("click", event => {
+      const action = event.target.closest(`#${MENU_ID} [data-g1-menu-action]`);
+
+      if (action) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        g1ApplyMenuAction(action.dataset.g1MenuAction);
+        return;
+      }
+
+      const row = event.target.closest("[data-g1-missed-row]");
+
+      if (row) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        g1JumpToPoint(row.dataset.pointId || "");
+        return;
+      }
+
+      if (!event.target.closest(`#${MENU_ID}`)) {
+        g1CloseMenu();
+      }
+    }, true);
+
+    /*
+      右鍵：
+      - panel row 開 menu
+      - 正文 marker 開 menu
+      正文 marker 左鍵不處理，避免干擾選字與編輯。
+    */
+    document.addEventListener("contextmenu", event => {
+      const row = event.target.closest("[data-g1-missed-row]");
+
+      if (row) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        g1OpenMenuFromRow(row, event);
+        return;
+      }
+
+      const marker = event.target.closest("[data-missed-point-id]");
+
+      if (marker) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        g1OpenMenuFromMarker(marker, event);
+      }
+    }, true);
+
+    /*
+      編輯時同步 marker class。
+    */
+    document.addEventListener("input", event => {
+      const context = g1GetEditorContextFromElement(event.target);
+
+      if (!context) return;
+
+      const note = g1GetEditableNote();
+
+      if (!note) return;
+
+      g1SyncNoteHtmlFromEditors(note);
+      g1NormalizeMarkers(context.editor, note);
+      g1RenderPanel();
+    }, true);
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") {
+        g1CloseMenu();
+      }
+    }, true);
+
+    window.addEventListener("resize", () => {
+      g1RunSoon();
+    }, { passive: true });
+  }
+
+  /* ---------- init ---------- */
+
+  function g1Run() {
+    g1PatchSanitizer();
+    g1InjectToolbarButtons();
+    g1NormalizeMarkers();
+    g1RenderPanel();
+  }
+
+  function g1RunSoon() {
+    clearTimeout(window.__creamyMissedPointG1Timer1);
+    clearTimeout(window.__creamyMissedPointG1Timer2);
+    clearTimeout(window.__creamyMissedPointG1Timer3);
+
+    window.__creamyMissedPointG1Timer1 = setTimeout(g1Run, 30);
+    window.__creamyMissedPointG1Timer2 = setTimeout(g1Run, 120);
+    window.__creamyMissedPointG1Timer3 = setTimeout(g1Run, 320);
+  }
+
+  function g1Init() {
+    g1PatchSanitizer();
+    g1BindEvents();
+
+    g1WrapFunction("renderStudyMode", g1AfterRender);
+    g1WrapFunction("renderAll", g1AfterRender);
+    g1WrapFunction("openModal", g1AfterRender);
+    g1WrapFunction("saveStudyInlineEdit", g1AfterRender);
+    g1WrapFunction("saveNoteFromModal", g1AfterRender);
+
+    g1RunSoon();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => g1Ready(g1Init));
+  } else {
+    g1Ready(g1Init);
+  }
+
+  const observer = new MutationObserver(() => {
+    clearTimeout(window.__creamyMissedPointG1ObserverTimer);
+
+    window.__creamyMissedPointG1ObserverTimer = setTimeout(() => {
+      if (studyState?.active) g1Run();
+    }, 120);
+  });
+
+  setTimeout(() => {
+    observer.observe(document.getElementById("studyStage") || document.body, {
+      childList: true,
+      subtree: true
+    });
+  }, 500);
+
+  window.creamyMissedPointG1Repair = g1RunSoon;
+  window.creamyMissedPointAddFromSelection = g1AddFromSelection;
+})();
+
+
+/* =========================================================
+   Card Library Context Menu Auto-fit H1
+   修正：
+   - 卡片庫右鍵選單顯示不全
+   - 自動避開 viewport 邊界
+   - 小螢幕 / zoom in 自動改成可滾動
+   ========================================================= */
+
+(function () {
+  if (window.__creamyLibraryContextMenuAutoFitH1) return;
+  window.__creamyLibraryContextMenuAutoFitH1 = true;
+
+  const SAFE_GAP = 14;
+
+  const MENU_SELECTORS = [
+    ".note-context-menu",
+    ".card-context-menu",
+    ".library-context-menu",
+    "#noteContextMenu",
+    "#cardContextMenu",
+    "#libraryContextMenu",
+    ".context-menu"
+  ];
+
+  const EXCLUDE_SELECTORS = [
+    "#missedPointContextMenu",
+    ".missed-point-context-menu"
+  ];
+
+  function h1IsExcluded(menu) {
+    return EXCLUDE_SELECTORS.some(selector => menu.matches(selector));
+  }
+
+  function h1IsVisible(menu) {
+    if (!menu || h1IsExcluded(menu)) return false;
+
+    const style = window.getComputedStyle(menu);
+    const rect = menu.getBoundingClientRect();
+
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      !menu.classList.contains("hidden") &&
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  }
+
+  function h1FindMenus() {
+    return MENU_SELECTORS
+      .flatMap(selector => Array.from(document.querySelectorAll(selector)))
+      .filter(menu => !h1IsExcluded(menu))
+      .filter((menu, index, arr) => arr.indexOf(menu) === index);
+  }
+
+  function h1ParsePx(value) {
+    const num = Number.parseFloat(value);
+    return Number.isFinite(num) ? num : 0;
+  }
+
+  function h1AutoFitMenu(menu) {
+    if (!h1IsVisible(menu)) return;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const maxHeight = Math.max(180, vh - SAFE_GAP * 2);
+    const maxWidth = Math.max(220, Math.min(320, vw - SAFE_GAP * 2));
+
+    menu.style.maxHeight = `${maxHeight}px`;
+    menu.style.overflowY = "auto";
+    menu.style.overscrollBehavior = "contain";
+    menu.style.maxWidth = `${maxWidth}px`;
+    menu.style.boxSizing = "border-box";
+
+    /*
+      先讀取目前位置。
+      如果原本是 fixed，就直接用 viewport rect。
+      如果是 absolute，也用 rect 推回 viewport，最後轉成 fixed，
+      避免父層 overflow hidden 裁切。
+    */
+    const rect = menu.getBoundingClientRect();
+
+    let left = rect.left;
+    let top = rect.top;
+
+    const computed = window.getComputedStyle(menu);
+
+    /*
+      如果 menu 沒有明確 left/top，從目前 rect 接手。
+    */
+    if (computed.position !== "fixed") {
+      menu.style.position = "fixed";
+      left = rect.left;
+      top = rect.top;
+    } else {
+      const styleLeft = h1ParsePx(menu.style.left);
+      const styleTop = h1ParsePx(menu.style.top);
+
+      if (styleLeft || menu.style.left) left = styleLeft;
+      if (styleTop || menu.style.top) top = styleTop;
+    }
+
+    /*
+      重新量一次，因為 maxHeight/maxWidth 可能改變尺寸。
+    */
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    const fittedRect = menu.getBoundingClientRect();
+
+    if (left + fittedRect.width + SAFE_GAP > vw) {
+      left = vw - fittedRect.width - SAFE_GAP;
+    }
+
+    if (top + fittedRect.height + SAFE_GAP > vh) {
+      top = vh - fittedRect.height - SAFE_GAP;
+    }
+
+    if (left < SAFE_GAP) left = SAFE_GAP;
+    if (top < SAFE_GAP) top = SAFE_GAP;
+
+    menu.style.position = "fixed";
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.right = "auto";
+    menu.style.bottom = "auto";
+    menu.style.zIndex = menu.style.zIndex || "99999";
+  }
+
+  function h1AutoFitAll() {
+    h1FindMenus().forEach(h1AutoFitMenu);
+  }
+
+  function h1RunSoon() {
+    clearTimeout(window.__creamyLibraryContextMenuAutoFitH1Timer1);
+    clearTimeout(window.__creamyLibraryContextMenuAutoFitH1Timer2);
+    clearTimeout(window.__creamyLibraryContextMenuAutoFitH1Timer3);
+
+    window.__creamyLibraryContextMenuAutoFitH1Timer1 = setTimeout(h1AutoFitAll, 0);
+    window.__creamyLibraryContextMenuAutoFitH1Timer2 = setTimeout(h1AutoFitAll, 40);
+    window.__creamyLibraryContextMenuAutoFitH1Timer3 = setTimeout(h1AutoFitAll, 120);
+  }
+
+  /*
+    右鍵後通常 menu 會在下一個 tick 建立 / 顯示。
+  */
+  document.addEventListener("contextmenu", () => {
+    h1RunSoon();
+  }, true);
+
+  /*
+    有些 app 是 click 更多按鈕開 menu，也一起處理。
+  */
+  document.addEventListener("click", event => {
+    const possibleMenuTrigger = event.target.closest(
+      "[data-note-menu], [data-card-menu], [data-context-menu], .note-menu-btn, .card-menu-btn, .more-btn"
+    );
+
+    if (possibleMenuTrigger) {
+      h1RunSoon();
+    } else {
+      setTimeout(h1AutoFitAll, 20);
+    }
+  }, true);
+
+  /*
+    DOM 變動時，如果 menu 出現就自動 fit。
+  */
+  const observer = new MutationObserver(() => {
+    h1RunSoon();
+  });
+
+  setTimeout(() => {
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden"]
+    });
+  }, 300);
+
+  window.addEventListener("resize", h1RunSoon, { passive: true });
+  window.addEventListener("scroll", h1RunSoon, true);
+
+  window.creamyLibraryContextMenuAutoFitH1Repair = h1AutoFitAll;
+})();
+
+/* =========================================================
+   CORE STABLE STUDY PATCH V3
+   修正核心：
+   - 禁止切卡 / preview click / 記住了 時把舊 DOM 寫回新卡
+   - preview 點擊只改 index，不改 queue 順序
+   - 卡片庫單卡查看可進入該 deck queue，但保留 clicked index
+   - applyStudyAction 以 noteId 移除，不靠可能被改動的 index
+   - study render 永遠從 canonical appState note 讀資料
+   ========================================================= */
+
+(function () {
+  if (window.__creamyCoreStableStudyV3) return;
+  window.__creamyCoreStableStudyV3 = true;
+
+  /* ---------- canonical note helpers ---------- */
+
+  function csId(value) {
+    return String(value || "");
+  }
+
+  function csFindNote(noteId) {
+    return appState?.notes?.find(note => csId(note.id) === csId(noteId)) || null;
+  }
+
+  function csCanonicalNote(note) {
+    if (!note) return null;
+    return csFindNote(note.id) || note;
+  }
+
+  function csCanonicalizeQueue(queue) {
+    const seen = new Set();
+    const result = [];
+
+    (queue || []).forEach(item => {
+      const note = csCanonicalNote(item);
+      if (!note?.id) return;
+
+      const id = csId(note.id);
+      if (seen.has(id)) return;
+
+      seen.add(id);
+      result.push(note);
+    });
+
+    return result;
+  }
+
+  function csClampStudyIndex() {
+    if (!studyState?.notes?.length) {
+      studyState.index = 0;
+      return;
+    }
+
+    studyState.index = clamp(studyState.index, 0, studyState.notes.length - 1);
+  }
+
+  function csRefreshStudyQueueReferences() {
+    if (!studyState?.notes) return;
+
+    const currentId = studyState.notes[studyState.index]?.id || "";
+
+    studyState.notes = csCanonicalizeQueue(studyState.notes);
+
+    if (currentId) {
+      const nextIndex = studyState.notes.findIndex(note => csId(note.id) === csId(currentId));
+      if (nextIndex !== -1) {
+        studyState.index = nextIndex;
+      }
+    }
+
+    studyState.total = Math.max(studyState.total || 0, studyState.notes.length);
+    csClampStudyIndex();
+  }
+
+  function csSyncNoteToQueue(noteId) {
+    const canonical = csFindNote(noteId);
+    if (!canonical || !studyState?.notes?.length) return;
+
+    studyState.notes = studyState.notes.map(note => {
+      if (csId(note.id) === csId(noteId)) return canonical;
+      return note;
+    });
+  }
+
+  function csCurrentNote() {
+    csRefreshStudyQueueReferences();
+    return studyState?.notes?.[studyState.index] || null;
+  }
+
+  function csIsValidStudyNote(note) {
+    if (!note) return false;
+
+    const q = stripHtml(note.questionHtml || note.question || "").trim();
+
+    /*
+      flashcard 至少要有問題。
+      答案可以空，因為有些卡可能是 Q-only 或圖片卡。
+    */
+    if (!q && !(note.questionHtml || "").includes("data-file-id")) return false;
+
+    return true;
+  }
+
+  /* ---------- restore clean queue behavior ---------- */
+
+  if (typeof getStudyQueueIndexByNoteIdFinal === "function") {
+    getStudyQueueIndexByNoteIdFinal = function (noteId) {
+      return (studyState.notes || []).findIndex(note => csId(note.id) === csId(noteId));
+    };
+
+    window.getStudyQueueIndexByNoteIdFinal = getStudyQueueIndexByNoteIdFinal;
+  }
+
+  /*
+    卡片庫點某一張：
+    - 可以直接進學習模式
+    - 但不再把點擊卡強制移到 queue[0]
+    - 保留原本 queue 順序，index 指向被點擊卡
+  */
+  window.openCardDirectStudyFinal = openCardDirectStudyFinal = function (noteId) {
+    const clickedNote = csFindNote(noteId);
+    if (!clickedNote) return;
+
+    if (!csIsValidStudyNote(clickedNote)) {
+      showToast("這張卡內容不完整", "請先編輯卡片內容。", "warn");
+      openEditModal(clickedNote.id);
+      return;
+    }
+
+    const sourceDeckId = currentDeckWall || clickedNote.deckId;
+    const prefs = typeof getQuickStudyPrefsFinal === "function"
+      ? getQuickStudyPrefsFinal()
+      : {
+          order: "due-first",
+          viewMode: "split",
+          filter: "unmastered",
+          includeDone: "yes"
+        };
+
+    let queue = buildStudyQueue({ type: "deck", deckId: sourceDeckId }, prefs);
+    queue = csCanonicalizeQueue(queue);
+
+    /*
+      如果 clicked note 因為 filter 不在 queue，加入尾端。
+      不放前面，避免破壞 queue 順序。
+    */
+    if (!queue.some(note => csId(note.id) === csId(clickedNote.id))) {
+      queue.push(clickedNote);
+    }
+
+    const index = Math.max(
+      0,
+      queue.findIndex(note => csId(note.id) === csId(clickedNote.id))
+    );
+
+    const label = `${getDeckName(sourceDeckId)} Deck`;
+
+    if (typeof enterStudyModeWithQueueFinal === "function") {
+      enterStudyModeWithQueueFinal(queue, index, "deck", label, prefs);
+    } else {
+      studyState = {
+        active: true,
+        sourceType: "deck",
+        sourceLabel: label,
+        notes: queue,
+        index,
+        total: queue.length,
+        answerVisible: false,
+        stats: {
+          remembered: 0,
+          okay: 0,
+          forgot: 0,
+          mastered: 0,
+          later: 0
+        },
+        preferences: prefs
+      };
+
+      studyInlineEditing = false;
+      studyEditingTarget = "answer";
+      studyEditDraft = { questionHtml: "", answerHtml: "" };
+
+      els.studyPreferenceModal.classList.add("hidden");
+      els.studyModeView.classList.remove("hidden");
+      document.body.classList.add("study-open");
+
+      renderStudyMode();
+    }
+
+    if (typeof playSound === "function") playSound("preview");
+  };
+
+  /*
+    preview rail 點卡：
+    - 只跳 index
+    - 不 unshift
+    - 不 move to front
+    - 不寫入 note
+  */
+  window.jumpStudyPreviewByNoteFinal = jumpStudyPreviewByNoteFinal = function (noteId) {
+    if (studyInlineEditing) {
+      showToast("請先儲存或取消編輯", "", "warn");
+      return;
+    }
+
+    if (!studyState?.active) return;
+
+    const target = csFindNote(noteId);
+    if (!target) return;
+
+    if (!csIsValidStudyNote(target)) {
+      showToast("這張卡內容不完整", "請先編輯卡片內容。", "warn");
+      return;
+    }
+
+    csRefreshStudyQueueReferences();
+
+    let index = studyState.notes.findIndex(note => csId(note.id) === csId(target.id));
+
+    /*
+      如果目前是「全部」搜尋找到的卡，不在 queue，就加入 queue 尾端。
+      只加入，不改其他順序。
+    */
+    if (index === -1) {
+      studyState.notes.push(target);
+      studyState.notes = csCanonicalizeQueue(studyState.notes);
+      index = studyState.notes.findIndex(note => csId(note.id) === csId(target.id));
+    }
+
+    studyState.index = Math.max(0, index);
+    studyState.total = Math.max(studyState.total || 0, studyState.notes.length);
+    studyState.answerVisible = false;
+
+    /*
+      清掉之前 ActiveGuard 留下的 forced id。
+      之後 active 只看真正 index。
+    */
+    window.__creamyForcedActiveStudyNoteId = "";
+    window.__creamyForcedActiveStudyNoteUntil = 0;
+
+    if (typeof playSound === "function") playSound("preview");
+
+    renderStudyMode();
+  };
+
+  /* ---------- safe render study mode ---------- */
+
+  window.renderStudyMode = renderStudyMode = async function () {
+    if (!studyState?.active) return;
+
+    csRefreshStudyQueueReferences();
+
+    const note = csCurrentNote();
+
+    if (!note) {
+      renderStudyComplete();
+      return;
+    }
+
+    els.studyStage.classList.remove("hidden");
+    els.studyCompleteState.classList.add("hidden");
+
+    els.studyModeTitle.textContent = "學習模式";
+    els.studyModeSubtitle.textContent = studyState.sourceLabel || "";
+
+    const doneCount =
+      Number(studyState.stats.remembered || 0) +
+      Number(studyState.stats.okay || 0) +
+      Number(studyState.stats.forgot || 0) +
+      Number(studyState.stats.mastered || 0);
+
+    const displayTotal = Math.max(studyState.total || studyState.notes.length, 1);
+    const currentPosition = Math.min(studyState.index + 1, studyState.notes.length || 1);
+
+    els.studyProgressText.textContent = `${currentPosition} / ${displayTotal}`;
+    els.studyRemainingText.textContent = `清單 ${studyState.notes.length} 張`;
+    els.studyProgressFill.style.width = `${(doneCount / displayTotal) * 100}%`;
+
+    els.studyDeckBadge.textContent = getDeckName(note.deckId);
+    els.studyCurveBadge.textContent = getCurveStageLabel(note.reviewStage);
+    els.studyStateBadge.textContent = getStudyStateLabel(note);
+
+    const questionHtml = studyInlineEditing
+      ? (studyEditDraft.questionHtml || "")
+      : (note.questionHtml || "");
+
+    const answerHtml = studyInlineEditing
+      ? (studyEditDraft.answerHtml || "")
+      : (note.answerHtml || "");
+
+    els.studyQuestion.innerHTML = questionHtml;
+    els.studyAnswer.innerHTML = answerHtml;
+    els.studyQuestionSplit.innerHTML = questionHtml;
+    els.studyAnswerSplit.innerHTML = answerHtml;
+
+    const isFlip = studyState.preferences.viewMode === "flip";
+
+    els.studyCardFlip.classList.toggle("hidden", !isFlip);
+    els.studyCardSplit.classList.toggle("hidden", isFlip);
+
+    if (isFlip) {
+      updateStudyCardFlipState();
+      els.studySplitAnswerPanel.classList.remove("answer-hidden");
+      els.studySplitAnswerCover.classList.add("hidden");
+    } else {
+      els.studyCardInner.classList.remove("flipped");
+      updateStudySplitAnswerVisibility();
+    }
+
+    updateStudyFlipButtonLabel();
+
+    await hydrateRichContentImages(els.studyQuestion);
+    await hydrateRichContentImages(els.studyAnswer);
+    await hydrateRichContentImages(els.studyQuestionSplit);
+    await hydrateRichContentImages(els.studyAnswerSplit);
+
+    if (!studyInlineEditing) {
+      [
+        els.studyQuestion,
+        els.studyAnswer,
+        els.studyQuestionSplit,
+        els.studyAnswerSplit
+      ].forEach(el => {
+        if (el) el.scrollTop = 0;
+      });
+    }
+
+    if (studyInlineEditing) {
+      applyStudyEditingTarget();
+    } else {
+      clearStudyEditableClasses();
+      updateStudyEditTabs();
+    }
+
+    if (typeof renderStudyPreviewRailFinal === "function") {
+      renderStudyPreviewRailFinal();
+    }
+
+    if (typeof applySavedSplitDepthFinal === "function") {
+      applySavedSplitDepthFinal();
+    }
+
+    /*
+      只刷新常漏點 UI，不做 DOM -> note 寫入。
+      注意：不要呼叫 creamyMissedPointG11Repair。
+    */
+    if (typeof window.creamyMetaInjectStudyQuickControls === "function") {
+      requestAnimationFrame(() => window.creamyMetaInjectStudyQuickControls());
+    }
+
+    if (typeof window.creamyMissedPointG1Repair === "function") {
+      requestAnimationFrame(() => window.creamyMissedPointG1Repair());
+    }
+  };
+
+  /* ---------- safe study navigation ---------- */
+
+  window.studyPrev = studyPrev = function () {
+    if (studyInlineEditing) {
+      showToast("請先儲存或取消編輯", "", "warn");
+      return;
+    }
+
+    csRefreshStudyQueueReferences();
+
+    if (studyState.index > 0) {
+      studyState.index -= 1;
+      studyState.answerVisible = false;
+      renderStudyMode();
+    }
+  };
+
+  window.studyNext = studyNext = function () {
+    if (studyInlineEditing) {
+      showToast("請先儲存或取消編輯", "", "warn");
+      return;
+    }
+
+    csRefreshStudyQueueReferences();
+
+    if (studyState.index < studyState.notes.length - 1) {
+      studyState.index += 1;
+      studyState.answerVisible = false;
+      renderStudyMode();
+    }
+  };
+
+  window.toggleStudyLayout = toggleStudyLayout = function () {
+    if (studyInlineEditing) {
+      showToast("請先儲存或取消編輯", "", "warn");
+      return;
+    }
+
+    studyState.preferences.viewMode =
+      studyState.preferences.viewMode === "flip" ? "split" : "flip";
+
+    studyState.answerVisible = false;
+    renderStudyMode();
+  };
+
+  /* ---------- safe inline edit save ---------- */
+
+  window.saveStudyInlineEdit = saveStudyInlineEdit = function () {
+    const note = csCurrentNote();
+    if (!note) return;
+
+    const targets = getStudyEditableTargets();
+
+    studyEditDraft.questionHtml = sanitizeRichHtml(targets.question.innerHTML || "");
+    studyEditDraft.answerHtml = sanitizeRichHtml(targets.answer.innerHTML || "");
+
+    const canonical = csFindNote(note.id) || note;
+
+    canonical.questionHtml = studyEditDraft.questionHtml;
+    canonical.answerHtml = studyEditDraft.answerHtml;
+    canonical.question = stripHtml(canonical.questionHtml);
+    canonical.answer = stripHtml(canonical.answerHtml);
+    canonical.updatedAt = todayStr();
+
+    /*
+      如果 queue 裡不是 canonical reference，也同步一次。
+    */
+    note.questionHtml = canonical.questionHtml;
+    note.answerHtml = canonical.answerHtml;
+    note.question = canonical.question;
+    note.answer = canonical.answer;
+    note.updatedAt = canonical.updatedAt;
+
+    csSyncNoteToQueue(canonical.id);
+
+    requestSave("卡片內容已更新");
+    disableStudyInlineEdit();
+    playSound("save");
+    showToast("卡片內容已更新", "", "success");
+
+    renderStudyMode();
+  };
+
+  /* ---------- safe review action ---------- */
+
+  window.applyStudyAction = applyStudyAction = function (action) {
+    if (studyInlineEditing) {
+      showToast("請先儲存或取消編輯", "", "warn");
+      return;
+    }
+
+    csRefreshStudyQueueReferences();
+
+    const current = csCurrentNote();
+    if (!current) return;
+
+    const noteId = csId(current.id);
+    const canonical = csFindNote(noteId) || current;
+
+    if (action === "later") {
+      studyState.stats.later += 1;
+
+      if (studyState.notes.length > 1) {
+        const currentIndex = studyState.notes.findIndex(note => csId(note.id) === noteId);
+
+        if (currentIndex !== -1) {
+          const [moved] = studyState.notes.splice(currentIndex, 1);
+          studyState.notes.push(moved);
+
+          /*
+            稍後再看後顯示下一張。
+            如果原本是最後一張，就回到第一張。
+          */
+          if (currentIndex >= studyState.notes.length) {
+            studyState.index = 0;
+          } else {
+            studyState.index = currentIndex;
+          }
+        }
+      }
+
+      studyState.answerVisible = false;
+      showToast("已移到稍後再看", "", "info");
+      renderStudyMode();
+      return;
+    }
+
+    applyReviewResultToNote(canonical, action);
+    csSyncNoteToQueue(noteId);
+
+    requestSave("複習進度已儲存");
+
+    if (action === "remembered") studyState.stats.remembered += 1;
+    if (action === "okay") studyState.stats.okay += 1;
+    if (action === "forgot") studyState.stats.forgot += 1;
+    if (action === "mastered") studyState.stats.mastered += 1;
+
+    if (action === "forgot") playSound("forgot");
+    else if (action === "mastered") playSound("mastered");
+    else playSound("remembered");
+
+    const removeIndex = studyState.notes.findIndex(note => csId(note.id) === noteId);
+
+    if (removeIndex !== -1) {
+      studyState.notes.splice(removeIndex, 1);
+
+      /*
+        保持「下一張」在同一位置。
+        如果刪的是最後一張，就退到最後。
+      */
+      if (studyState.index > removeIndex) {
+        studyState.index -= 1;
+      }
+
+      if (studyState.index >= studyState.notes.length) {
+        studyState.index = studyState.notes.length - 1;
+      }
+
+      if (studyState.index < 0) {
+        studyState.index = 0;
+      }
+    }
+
+    studyState.answerVisible = false;
+
+    if (!studyState.notes.length) {
+      renderStudyComplete();
+      return;
+    }
+
+    renderStudyMode();
+  };
+
+  /* ---------- safe close ---------- */
+
+  window.closeStudyMode = closeStudyMode = function () {
+    studyState.active = false;
+    studyInlineEditing = false;
+    studyState.answerVisible = false;
+
+    els.studyModeView.classList.add("hidden");
+    els.studyInlineEditBar.classList.add("hidden");
+    els.studyStage.classList.remove("hidden");
+    els.studyCompleteState.classList.add("hidden");
+
+    document.body.classList.remove("study-open");
+
+    const shell = document.querySelector(".study-shell");
+    const rail = document.getElementById("studyPreviewRail");
+
+    shell?.classList.remove("study-with-rail");
+
+    if (rail) {
+      rail.classList.add("hidden");
+      rail.innerHTML = "";
+    }
+
+    renderAll();
+  };
+
+  /* ---------- safe preview rail active rendering ---------- */
+
+  if (typeof renderStudyPreviewRailFinal === "function") {
+    window.renderStudyPreviewRailFinal = renderStudyPreviewRailFinal = function () {
+      const shell = document.querySelector(".study-shell");
+      if (!shell) return;
+
+      const rail = ensureStudyPreviewRailFinal();
+
+      if (!studyState?.active || !studyState.notes?.length) {
+        shell.classList.remove("study-with-rail");
+        rail.classList.add("hidden");
+        rail.innerHTML = "";
+        return;
+      }
+
+      csRefreshStudyQueueReferences();
+
+      shell.classList.add("study-with-rail");
+      rail.classList.remove("hidden");
+
+      const title = getStudyPreviewTitleFinal();
+      const candidates = getStudyPreviewCandidatesFinal();
+      const activeNote = studyState.notes[studyState.index];
+      const activeId = csId(activeNote?.id);
+
+      rail.innerHTML = `
+        <div class="study-preview-head">
+          <h4>${escapeHtml(title)}</h4>
+          <span>${studyState.notes.length} 張</span>
+        </div>
+
+        <div class="study-preview-tools study-preview-tools-hotfix">
+          <input
+            id="studyPreviewSearchInput"
+            class="study-preview-search"
+            type="search"
+            placeholder="搜尋卡片…"
+            value="${escapeAttr(creamyFinalPreviewState.query || "")}"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            inputmode="search"
+          />
+
+          <select
+            id="studyPreviewTargetSelect"
+            class="study-preview-scope"
+            title="搜尋欄位"
+          >
+            <option value="both" ${creamyFinalPreviewState.target === "both" ? "selected" : ""}>Q+A</option>
+            <option value="question" ${creamyFinalPreviewState.target === "question" ? "selected" : ""}>問題</option>
+            <option value="answer" ${creamyFinalPreviewState.target === "answer" ? "selected" : ""}>答案</option>
+            <option value="deck" ${creamyFinalPreviewState.target === "deck" ? "selected" : ""}>Deck</option>
+            <option value="all" ${creamyFinalPreviewState.target === "all" ? "selected" : ""}>全部欄位</option>
+          </select>
+
+          <select
+            id="studyPreviewScopeSelect"
+            class="study-preview-scope"
+            title="搜尋範圍"
+          >
+            <option value="queue" ${creamyFinalPreviewState.scope === "queue" ? "selected" : ""}>目前</option>
+            <option value="all" ${creamyFinalPreviewState.scope === "all" ? "selected" : ""}>全部</option>
+          </select>
+        </div>
+
+        <div class="study-preview-list" id="studyPreviewList">
+          ${
+            candidates.length
+              ? candidates.map(rawNote => {
+                  const note = csCanonicalNote(rawNote);
+                  const deck = getDeck(note.deckId);
+                  const q = getPlainPreviewFromHtml(note.questionHtml, 120);
+                  const queueIndex = getStudyQueueIndexByNoteIdFinal(note.id);
+                  const active = csId(note.id) === activeId ? "active" : "";
+                  const fromAll = queueIndex === -1 ? "from-all-decks" : "";
+                  const fit = getStudyPreviewFitClassFinal(q);
+
+                  return `
+                    <button
+                      type="button"
+                      class="study-preview-card ${active} ${fromAll} ${fit}"
+                      data-study-preview-note="${escapeAttr(note.id)}"
+                      title="切換到這張卡片"
+                    >
+                      <div class="study-preview-top">
+                        <span class="study-preview-dot" style="--dot-color:${escapeAttr(deck.color)}"></span>
+                        <span>${escapeHtml(deck.name)}</span>
+                      </div>
+
+                      <div class="study-preview-q">
+                        ${escapeHtml(q || "無文字問題")}
+                      </div>
+
+                      <div class="study-preview-meta">
+                        <span class="study-preview-pill">${escapeHtml(getStudyStateLabel(note))}</span>
+                        <span class="study-preview-pill">${escapeHtml(getCurveStageLabel(note.reviewStage))}</span>
+                        ${queueIndex === -1 ? `<span class="study-preview-pill extra">可加入</span>` : ""}
+                      </div>
+                    </button>
+                  `;
+                }).join("")
+              : `<div class="study-preview-empty">沒有符合搜尋的卡片</div>`
+          }
+        </div>
+      `;
+    };
+  }
+
+  /* ---------- prevent adding missed point while not editing ---------- */
+
+  document.addEventListener("click", event => {
+    const btn = event.target.closest("[data-g1-missed-point-button]");
+    if (!btn) return;
+
+    const inStudy = btn.closest("#studyModeView") || document.activeElement?.closest?.("#studyModeView");
+
+    if (inStudy && !studyInlineEditing) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      showToast("請先按「原地編輯」", "進入編輯狀態後再標記常漏點。", "warn");
+    }
+  }, true);
+
+  /* ---------- final repair ---------- */
+
+  window.creamyCoreStableStudyV3Repair = function () {
+    window.__creamyForcedActiveStudyNoteId = "";
+    window.__creamyForcedActiveStudyNoteUntil = 0;
+
+    csRefreshStudyQueueReferences();
+
+    if (studyState?.active) {
+      renderStudyMode();
+    }
+
+    return {
+      active: !!studyState?.active,
+      index: studyState?.index,
+      currentId: studyState?.notes?.[studyState.index]?.id,
+      queueLength: studyState?.notes?.length
+    };
+  };
+
+})();
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(console.error);
+  });
+}

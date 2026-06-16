@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="奶油記憶" />
+  <meta name="theme-color" content="#f8f4ee" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <title>奶油記憶 Creamy Recall</title>
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body data-theme="cream">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-card creamy-card">
+        <div class="brand-top">
+          <div id="brandIcon" class="brand-icon">🧈</div>
+          <div>
+            <h1>奶油記憶</h1>
+            <p>Creamy Recall</p>
+          </div>
+        </div>
+        <div id="todayDateText" class="today-date"></div>
+      </div>
+
+      <nav class="nav creamy-card" aria-label="主選單">
+        <button class="nav-btn active" data-view="home">首頁</button>
+        <button class="nav-btn" data-view="notes">卡片庫</button>
+        <button class="nav-btn" data-view="calendar">日曆</button>
+        <button class="nav-btn" data-view="review">複習</button>
+        <button class="nav-btn" data-view="settings">設定</button>
+      </nav>
+
+      <section class="save-status creamy-card">
+        <div id="saveDot" class="save-dot"></div>
+        <div>
+          <strong id="saveText">已載入</strong>
+          <p id="saveHint">自動儲存已開啟</p>
+        </div>
+      </section>
+    </aside>
+
+    <main class="main-panel">
+      <header class="page-header creamy-card">
+        <div>
+          <h2 id="pageTitle">首頁</h2>
+          <p id="pageSubtitle">今天也溫柔地學一點、記久一點。</p>
+        </div>
+
+        <div class="header-actions">
+          <button id="studyTodayBtn" class="hero-btn hero-btn-review">開始複習</button>
+          <button id="addNoteBtn" class="hero-btn hero-btn-add">新增卡片</button>
+        </div>
+      </header>
+
+      <section id="homeView" class="view active">
+        <div class="stats-grid">
+          <div class="stat-card creamy-card">
+            <span>今日待複習</span>
+            <strong id="statDueToday">0</strong>
+          </div>
+          <div class="stat-card creamy-card">
+            <span>今日新增</span>
+            <strong id="statNewToday">0</strong>
+          </div>
+          <div class="stat-card creamy-card">
+            <span>今日完成</span>
+            <strong id="statDoneToday">0</strong>
+          </div>
+          <div class="stat-card creamy-card">
+            <span>連續學習</span>
+            <strong><span id="statStreak">0</span> 天</strong>
+          </div>
+        </div>
+
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3>科別 Deck</h3>
+              <p class="soft-text">點進去看該科全部卡片，或直接開始複習。</p>
+            </div>
+            <div class="section-actions">
+              <button id="studyTodayInlineBtn" class="hero-btn hero-btn-review small">開始複習</button>
+              <button id="addDeckBtn" class="ghost-btn">新增 Deck</button>
+            </div>
+          </div>
+          <div id="subjectDeckGrid" class="subject-grid"></div>
+        </section>
+
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3>今日任務</h3>
+              <p class="soft-text">你的今日待辦都會在這裡。</p>
+            </div>
+          </div>
+          <div id="todayTasksList" class="task-list"></div>
+        </section>
+      </section>
+
+      <section id="notesView" class="view">
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3 id="notesSectionTitle">所有卡片</h3>
+              <p id="notesSectionHint" class="soft-text">點科目 deck 進入該科卡片牆</p>
+            </div>
+            <button id="addNoteFromNotesBtn" class="primary-btn">新增卡片</button>
+          </div>
+
+          <div id="subjectWallHeader" class="subject-wall-header hidden"></div>
+
+          <div class="filters-grid">
+            <div class="field">
+              <label>搜尋</label>
+              <input id="searchInput" type="text" placeholder="搜尋問題、答案、筆記..." />
+            </div>
+
+            <div class="field">
+              <label>Deck</label>
+              <select id="filterDeck"></select>
+            </div>
+
+            <div class="field">
+              <label>重要性</label>
+              <select id="filterImportance">
+                <option value="">全部</option>
+                <option value="high">高</option>
+                <option value="medium">中</option>
+                <option value="low">低</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>難度</label>
+              <select id="filterDifficulty">
+                <option value="">全部</option>
+                <option value="hard">困難</option>
+                <option value="medium">中等</option>
+                <option value="easy">容易</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>學習狀態</label>
+              <select id="filterStudyState">
+                <option value="">全部</option>
+                <option value="new">新卡</option>
+                <option value="due">未複習</option>
+                <option value="normal">學習中</option>
+                <option value="mastered">已熟記</option>
+                <option value="wrong">錯題</option>
+                <option value="frequent">常錯</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>星號</label>
+              <select id="filterStarred">
+                <option value="">全部</option>
+                <option value="starred">只看標星</option>
+                <option value="unstarred">只看未標星</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="notesList" class="notes-wall"></div>
+        </section>
+      </section>
+
+      <section id="calendarView" class="view">
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3 id="calendarTitle">日曆</h3>
+              <p class="soft-text">查看每天的複習安排。</p>
+            </div>
+
+            <div class="calendar-controls">
+              <button id="prevMonthBtn" class="ghost-btn">上月</button>
+              <button id="todayMonthBtn" class="ghost-btn">今天</button>
+              <button id="nextMonthBtn" class="ghost-btn">下月</button>
+            </div>
+          </div>
+
+          <div id="calendarWeekdays" class="calendar-weekdays"></div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </section>
+
+        <section class="calendar-extra-grid">
+          <section class="creamy-card section-card cake-card">
+            <div id="cakeEmoji" class="cake-emoji">🍰</div>
+            <h3 id="cakeTitle">奶油蛋糕進度</h3>
+            <p id="cakeSub" class="soft-text">0 / 30</p>
+            <div class="progress-shell">
+              <div id="cakeProgress" class="progress-fill"></div>
+            </div>
+            <p id="cakeMeta" class="soft-text"></p>
+          </section>
+
+          <section class="creamy-card section-card">
+            <div class="section-title-row">
+              <div>
+                <h3>當日內容</h3>
+                <p id="selectedDateLabel" class="soft-text"></p>
+              </div>
+            </div>
+            <div id="selectedDateTasks" class="task-list"></div>
+          </section>
+        </section>
+      </section>
+
+      <section id="reviewView" class="view">
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3>今日複習</h3>
+              <p class="soft-text">你今天要看的卡片都在這裡。</p>
+            </div>
+            <button id="reviewToStudyBtn" class="ghost-btn">切到學習模式</button>
+          </div>
+          <div id="reviewList" class="review-list"></div>
+        </section>
+      </section>
+
+      <section id="settingsView" class="view">
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3>Application UI Theme</h3>
+              <p class="soft-text">選你喜歡的整體配色。</p>
+            </div>
+          </div>
+
+          <div class="theme-picker" id="themePicker">
+            <button class="theme-option" data-theme="cream">
+              <span class="theme-swatches">
+                <i style="background:#efb6a9"></i>
+                <i style="background:#f2d9ab"></i>
+                <i style="background:#fff6ed"></i>
+              </span>
+              <span>奶油桃</span>
+            </button>
+
+            <button class="theme-option" data-theme="lavender">
+              <span class="theme-swatches">
+                <i style="background:#b9a7eb"></i>
+                <i style="background:#e7defd"></i>
+                <i style="background:#f8f4ff"></i>
+              </span>
+              <span>霧紫</span>
+            </button>
+
+            <button class="theme-option" data-theme="mint">
+              <span class="theme-swatches">
+                <i style="background:#8fcdb8"></i>
+                <i style="background:#d9f3ea"></i>
+                <i style="background:#f6fffb"></i>
+              </span>
+              <span>薄荷</span>
+            </button>
+
+            <button class="theme-option" data-theme="sky">
+              <span class="theme-swatches">
+                <i style="background:#8ebce6"></i>
+                <i style="background:#dceeff"></i>
+                <i style="background:#f7fbff"></i>
+              </span>
+              <span>霧藍</span>
+            </button>
+
+            <button class="theme-option" data-theme="night">
+              <span class="theme-swatches">
+                <i style="background:#211f2b"></i>
+                <i style="background:#d7a36c"></i>
+                <i style="background:#b996df"></i>
+              </span>
+              <span>夜間奶油</span>
+            </button>
+
+            <button class="theme-option" data-theme="library">
+              <span class="theme-swatches">
+                <i style="background:#efe4d0"></i>
+                <i style="background:#6f4328"></i>
+                <i style="background:#dfc19a"></i>
+              </span>
+              <span>圖書館</span>
+            </button>
+
+            <button class="theme-option" data-theme="mono">
+              <span class="theme-swatches">
+                <i style="background:#ffffff"></i>
+                <i style="background:#999999"></i>
+                <i style="background:#202020"></i>
+              </span>
+              <span>專注灰階</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3>提醒與互動</h3>
+              <p class="soft-text">通知、音效、動畫與預設時間。</p>
+            </div>
+          </div>
+
+          <div class="filters-grid settings-grid">
+            <div class="field">
+              <label>預設提醒時間</label>
+              <input id="defaultReminderInput" type="time" />
+            </div>
+
+            <div class="field">
+              <label>音效音量</label>
+              <input id="soundVolumeInput" type="range" min="0" max="100" step="1" />
+            </div>
+
+            <div class="field switch-row">
+              <label>音效提醒</label>
+              <input id="soundToggle" type="checkbox" />
+            </div>
+
+            <div class="field switch-row">
+              <label>簡化動畫</label>
+              <input id="reduceMotionToggle" type="checkbox" />
+            </div>
+
+            <div class="field full action-row">
+              <button id="enableNotifyBtn" class="ghost-btn">啟用瀏覽器通知</button>
+              <button id="testSoundBtn" class="ghost-btn">測試音效</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3>蛋糕設定</h3>
+              <p class="soft-text">每完成一張卡，就幫蛋糕擠一點奶油。</p>
+            </div>
+          </div>
+
+          <div class="filters-grid settings-grid">
+            <div class="field">
+              <label>蛋糕 Emoji</label>
+              <input id="cakeKindInput" type="text" maxlength="4" />
+            </div>
+            <div class="field">
+              <label>幾點完成一個蛋糕</label>
+              <input id="cakeGoalInput" type="number" min="3" max="365" />
+            </div>
+          </div>
+        </section>
+
+        <section class="creamy-card section-card">
+          <div class="section-title-row">
+            <div>
+              <h3>備份與匯入</h3>
+              <p class="soft-text">會連同 IndexedDB 檔案一起匯出。</p>
+            </div>
+          </div>
+
+          <div class="backup-actions">
+            <button id="exportBackupBtn" class="primary-btn">匯出完整備份</button>
+            <button id="importMergeBtn" class="ghost-btn">匯入並合併</button>
+            <button id="importReplaceBtn" class="ghost-btn danger-lite">匯入並覆蓋</button>
+            <button id="resetAllBtn" class="ghost-btn danger-lite">清空資料</button>
+            <input id="importBackupInput" type="file" accept=".json,application/json" hidden />
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="noteModal" class="modal hidden">
+    <div class="modal-card note-modal-card">
+      <div class="modal-head">
+        <h3 id="modalTitle">新增卡片</h3>
+        <button id="closeModalBtn" class="icon-btn" type="button">✕</button>
+      </div>
+
+      <form id="noteForm" class="modal-form">
+        <input id="noteId" type="hidden" />
+
+        <div class="compact-meta-grid">
+          <div class="field">
+            <label>Deck</label>
+            <select id="deckInput"></select>
+          </div>
+
+          <div class="field">
+            <label>重要性</label>
+            <select id="importanceInput">
+              <option value="high">高</option>
+              <option value="medium" selected>中</option>
+              <option value="low">低</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>難度</label>
+            <select id="difficultyInput">
+              <option value="hard">困難</option>
+              <option value="medium" selected>中等</option>
+              <option value="easy">容易</option>
+            </select>
+          </div>
+
+          <div class="field star-field">
+            <label>標星</label>
+            <label class="check-pill">
+              <input id="starredInput" type="checkbox" />
+              <span>標記</span>
+            </label>
+          </div>
+
+          <div class="field">
+            <label>排程方式</label>
+            <select id="scheduleModeInput">
+              <option value="curve" selected>記憶曲線</option>
+              <option value="custom">手動日期</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>曲線階段</label>
+            <select id="curveStageInput">
+              <option value="0">新卡 / 今天</option>
+              <option value="1">第 1 階段（1 天後）</option>
+              <option value="2">第 2 階段（3 天後）</option>
+              <option value="3">第 3 階段（7 天後）</option>
+              <option value="4">第 4 階段（14 天後）</option>
+              <option value="5">第 5 階段（30 天後）</option>
+              <option value="6">第 6 階段（60 天後）</option>
+              <option value="7">第 7 階段（90 天後）</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>下次複習日期</label>
+            <input id="nextReviewDateInput" type="date" />
+          </div>
+
+          <div class="field">
+            <label>提醒時間</label>
+            <input id="reminderTimeInput" type="time" />
+          </div>
+        </div>
+
+        <div class="field full">
+          <label>問題</label>
+          <div class="editor-toolbar sticky-editor-toolbar">
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-cmd="bold"><b>B</b></button>
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-cmd="italic"><i>I</i></button>
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-cmd="underline"><u>U</u></button>
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-list="ul">• 清單</button>
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-list="ol">1. 編號</button>
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-action="undo">↶</button>
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-action="redo">↷</button>
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-action="insert-table">表格</button>
+            <button type="button" class="tool-btn" data-insert-image="questionEditor">插圖</button>
+            <button type="button" class="tool-btn" data-editor="questionEditor" data-action="clear-format">清除格式</button>
+
+            <span class="toolbar-sep"></span>
+            <button type="button" class="color-dot yellow" title="螢光黃" data-editor="questionEditor" data-highlight="#ffef76"></button>
+            <button type="button" class="color-dot pink" title="螢光粉" data-editor="questionEditor" data-highlight="#ffb3d9"></button>
+            <button type="button" class="color-dot cyan" title="螢光藍" data-editor="questionEditor" data-highlight="#9be7ff"></button>
+            <button type="button" class="color-dot green" title="螢光綠" data-editor="questionEditor" data-highlight="#b7ef9b"></button>
+            <button type="button" class="color-dot purple" title="螢光紫" data-editor="questionEditor" data-highlight="#d8c6ff"></button>
+            <button type="button" class="color-dot clear" data-editor="questionEditor" data-clear-highlight="true">∅</button>
+
+            <span class="toolbar-sep"></span>
+            <button type="button" class="text-color-dot black" data-editor="questionEditor" data-color="#222222"></button>
+            <button type="button" class="text-color-dot red" data-editor="questionEditor" data-color="#b74b4b"></button>
+            <button type="button" class="text-color-dot blue" data-editor="questionEditor" data-color="#376fa8"></button>
+            <button type="button" class="text-color-dot greenText" data-editor="questionEditor" data-color="#3d7d52"></button>
+          </div>
+          <div id="questionEditor" class="rich-editor" contenteditable="true" data-placeholder="輸入問題，可以拖拉 / 貼上圖片"></div>
+          <input type="file" id="questionInlineImageInput" accept=".jpg,.jpeg,.png,.webp,.gif,image/*" multiple hidden />
+        </div>
+
+        <div class="field full">
+          <label>答案</label>
+          <div class="editor-toolbar sticky-editor-toolbar">
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-cmd="bold"><b>B</b></button>
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-cmd="italic"><i>I</i></button>
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-cmd="underline"><u>U</u></button>
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-list="ul">• 清單</button>
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-list="ol">1. 編號</button>
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-action="undo">↶</button>
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-action="redo">↷</button>
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-action="insert-table">表格</button>
+            <button type="button" class="tool-btn" data-insert-image="answerEditor">插圖</button>
+            <button type="button" class="tool-btn" data-editor="answerEditor" data-action="clear-format">清除格式</button>
+
+            <span class="toolbar-sep"></span>
+            <button type="button" class="color-dot yellow" data-editor="answerEditor" data-highlight="#ffef76"></button>
+            <button type="button" class="color-dot pink" data-editor="answerEditor" data-highlight="#ffb3d9"></button>
+            <button type="button" class="color-dot cyan" data-editor="answerEditor" data-highlight="#9be7ff"></button>
+            <button type="button" class="color-dot green" data-editor="answerEditor" data-highlight="#b7ef9b"></button>
+            <button type="button" class="color-dot purple" data-editor="answerEditor" data-highlight="#d8c6ff"></button>
+            <button type="button" class="color-dot clear" data-editor="answerEditor" data-clear-highlight="true">∅</button>
+
+            <span class="toolbar-sep"></span>
+            <button type="button" class="text-color-dot black" data-editor="answerEditor" data-color="#222222"></button>
+            <button type="button" class="text-color-dot red" data-editor="answerEditor" data-color="#b74b4b"></button>
+            <button type="button" class="text-color-dot blue" data-editor="answerEditor" data-color="#376fa8"></button>
+            <button type="button" class="text-color-dot greenText" data-editor="answerEditor" data-color="#3d7d52"></button>
+          </div>
+          <div id="answerEditor" class="rich-editor" contenteditable="true" data-placeholder="輸入答案，可以拖拉 / 貼上圖片"></div>
+          <input type="file" id="answerInlineImageInput" accept=".jpg,.jpeg,.png,.webp,.gif,image/*" multiple hidden />
+        </div>
+
+        <div class="field full">
+          <label>補充筆記</label>
+          <textarea id="notesInput" rows="3" placeholder="可選填"></textarea>
+        </div>
+
+        <div class="attachments-row">
+          <div class="field">
+            <label>附加圖片</label>
+            <input id="imageInput" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,image/*" multiple />
+          </div>
+
+          <div class="field">
+            <label>附加檔案</label>
+            <input id="fileInput" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt" multiple />
+          </div>
+        </div>
+
+        <div id="attachmentPreview" class="attachment-preview"></div>
+
+        <div class="field full action-row">
+          <button type="button" id="deleteNoteBtn" class="ghost-btn danger-lite hidden">刪除</button>
+          <div class="grow"></div>
+          <button type="button" id="cancelModalBtn" class="ghost-btn">取消</button>
+          <button type="submit" class="primary-btn">儲存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="deckModal" class="modal hidden">
+    <div class="modal-card small">
+      <div class="modal-head">
+        <h3 id="deckModalTitle">新增 Deck</h3>
+        <button id="closeDeckModalBtn" class="icon-btn" type="button">✕</button>
+      </div>
+
+      <form id="deckForm" class="form-grid">
+        <input id="deckIdInput" type="hidden" />
+
+        <div class="field full">
+          <label>Deck 名稱</label>
+          <input id="deckNameInput" type="text" required placeholder="例如：心科、消化科" />
+        </div>
+
+        <div class="field full">
+          <label>Deck 顏色</label>
+          <input id="deckColorInput" type="color" value="#dcecff" />
+        </div>
+
+        <div class="field full action-row">
+          <button id="cancelDeckModalBtn" class="ghost-btn" type="button">取消</button>
+          <button class="primary-btn" type="submit">儲存 Deck</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="customReminderModal" class="modal hidden">
+    <div class="modal-card small">
+      <div class="modal-head">
+        <h3>手動指定複習日</h3>
+        <button id="closeCustomReminderBtn" class="icon-btn" type="button">✕</button>
+      </div>
+
+      <input id="customReviewNoteId" type="hidden" />
+
+      <div class="form-grid">
+        <div class="field full">
+          <label>下次複習日期</label>
+          <input id="customReviewDate" type="date" />
+        </div>
+
+        <div class="field full action-row">
+          <button id="cancelCustomReviewBtn" class="ghost-btn" type="button">取消</button>
+          <button id="saveCustomReviewBtn" class="primary-btn" type="button">儲存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="studyPreferenceModal" class="modal hidden">
+    <div class="modal-card small">
+      <div class="modal-head">
+        <h3>學習模式設定</h3>
+        <button id="closeStudyPreferenceBtn" class="icon-btn" type="button">✕</button>
+      </div>
+
+      <div class="form-grid">
+        <div class="field full">
+          <label>來源</label>
+          <input id="studySourceLabel" type="text" readonly />
+        </div>
+
+        <div class="field">
+          <label>順序</label>
+          <select id="studyOrderInput">
+            <option value="due-first">到期優先</option>
+            <option value="old-first">舊卡優先</option>
+            <option value="new-first">新卡優先</option>
+            <option value="stars-first">星號優先</option>
+            <option value="random">隨機</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>顯示模式</label>
+          <select id="studyViewModeInput">
+            <option value="flip">翻卡</option>
+            <option value="split">左右對照</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>篩選</label>
+          <select id="studyFilterInput">
+            <option value="all">全部</option>
+            <option value="due">只看未複習</option>
+            <option value="starred">只看標星</option>
+            <option value="high">只看高重要性</option>
+            <option value="wrong">只看錯題</option>
+            <option value="unmastered">只看未熟記</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>包含今天已完成</label>
+          <select id="studyIncludeDoneInput">
+            <option value="no">否</option>
+            <option value="yes">是</option>
+          </select>
+        </div>
+
+        <div class="field full action-row">
+          <button id="cancelStudyPreferenceBtn" class="ghost-btn" type="button">取消</button>
+          <button id="startStudyBtn" class="primary-btn" type="button">開始</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="studyModeView" class="study-mode hidden">
+    <div class="study-shell">
+      <div class="study-topbar creamy-card">
+        <div>
+          <h3 id="studyModeTitle">學習模式</h3>
+          <p id="studyModeSubtitle" class="soft-text"></p>
+        </div>
+
+        <div class="study-top-actions">
+          <button id="studyEditBtn" class="ghost-btn">原地編輯</button>
+          <button id="toggleStudyLayoutBtn" class="ghost-btn">切換版面</button>
+          <button id="exitStudyModeBtn" class="ghost-btn danger-lite">離開</button>
+        </div>
+      </div>
+
+      <div id="studyInlineEditBar" class="study-inline-editbar hidden">
+        <span class="soft-text">學習模式編輯</span>
+
+        <div class="seg-switch">
+          <button type="button" id="studyEditQuestionTab" class="seg-btn">編問題</button>
+          <button type="button" id="studyEditAnswerTab" class="seg-btn active">編答案</button>
+        </div>
+
+        <button type="button" class="tool-btn" data-study-cmd="bold"><b>B</b></button>
+        <button type="button" class="tool-btn" data-study-cmd="italic"><i>I</i></button>
+        <button type="button" class="tool-btn" data-study-cmd="underline"><u>U</u></button>
+        <button type="button" class="tool-btn" data-study-list="ul">• 清單</button>
+        <button type="button" class="tool-btn" data-study-list="ol">1. 編號</button>
+        <button type="button" class="tool-btn" data-study-action="insert-table">表格</button>
+        <button type="button" id="studyInsertImageBtn" class="tool-btn">插圖</button>
+        <button type="button" class="tool-btn" data-study-action="clear-format">清除格式</button>
+
+        <button type="button" class="color-dot yellow" data-study-highlight="#ffef76"></button>
+        <button type="button" class="color-dot pink" data-study-highlight="#ffb3d9"></button>
+        <button type="button" class="color-dot cyan" data-study-highlight="#9be7ff"></button>
+        <button type="button" class="color-dot green" data-study-highlight="#b7ef9b"></button>
+        <button type="button" class="color-dot purple" data-study-highlight="#d8c6ff"></button>
+        <button type="button" class="color-dot clear" data-study-clear-highlight="true">∅</button>
+
+        <button type="button" id="studySaveInlineBtn" class="mini-btn success-lite">儲存</button>
+        <button type="button" id="studyCancelInlineBtn" class="mini-btn danger-lite">取消</button>
+
+        <input type="file" id="studyInlineImageInput" accept=".jpg,.jpeg,.png,.webp,.gif,image/*" multiple hidden />
+      </div>
+
+      <div class="study-progress-wrap creamy-card compact-progress">
+        <div class="study-progress-text">
+          <span id="studyProgressText">1 / 1</span>
+          <span id="studyRemainingText">剩餘 0 張</span>
+        </div>
+        <div class="study-progress-bar">
+          <div id="studyProgressFill" class="study-progress-fill"></div>
+        </div>
+      </div>
+
+      <div id="studyStage" class="study-stage">
+        <div class="study-card-stack">
+          <div class="study-meta-row">
+            <span id="studyDeckBadge" class="study-chip">Deck</span>
+            <span id="studyCurveBadge" class="study-chip">新卡</span>
+            <span id="studyStateBadge" class="study-chip">新卡</span>
+          </div>
+
+          <div id="studyCardFlip" class="study-card-flip">
+            <div id="studyCardInner" class="study-card-inner">
+              <div class="study-face study-face-front">
+                <div class="study-face-label">問題</div>
+                <div id="studyQuestion" class="study-content rich-content"></div>
+                <div class="study-hint">點卡片即可翻面</div>
+              </div>
+
+              <div class="study-face study-face-back">
+                <div class="study-face-label">答案</div>
+                <div id="studyAnswer" class="study-content rich-content"></div>
+                <div class="study-hint">再點一下回問題</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="studyCardSplit" class="study-card-split hidden">
+            <div class="split-panel left">
+              <div class="study-face-label">問題</div>
+              <div id="studyQuestionSplit" class="study-content rich-content"></div>
+            </div>
+
+            <div id="studySplitResizer" class="split-resizer" title="拖曳調整寬度"></div>
+
+            <div id="studySplitAnswerPanel" class="split-panel right answer-hidden">
+              <div class="study-face-label">答案</div>
+
+              <div id="studySplitAnswerCover" class="split-answer-cover">
+                <div class="split-answer-cover-card">
+                  <p>答案目前隱藏</p>
+                  <button id="studySplitRevealBtn" class="primary-btn small-btn" type="button">顯示答案</button>
+                </div>
+              </div>
+
+              <div id="studyAnswerSplit" class="study-content rich-content"></div>
+            </div>
+          </div>
+
+<div id="studyBottomLayout" class="study-bottom-layout">
+  <div class="study-bottom-controls">
+    <div class="study-actions compact-actions">
+      <button class="mini-btn action-danger" id="studyForgotBtn">忘了</button>
+      <button class="mini-btn action-neutral" id="studyOkayBtn">普通</button>
+      <button class="mini-btn action-success" id="studyRememberedBtn">記住了</button>
+      <button class="mini-btn action-gold" id="studyMasteredBtn">已熟記</button>
+      <button class="mini-btn action-soft" id="studyLaterBtn">稍後再看</button>
+    </div>
+
+    <div class="study-nav-row">
+      <button class="ghost-btn" id="studyPrevBtn">上一張</button>
+      <button class="ghost-btn" id="studyFlipBtn">翻面</button>
+      <button class="ghost-btn" id="studyNextBtn">下一張</button>
+    </div>
+  </div>
+
+  <div id="studyMissedPointAnchor" class="study-missed-point-anchor"></div>
+</div>
+        </div>
+      </div>
+
+      <div id="studyCompleteState" class="creamy-card hidden">
+        <div class="complete-card">
+          <h3>本輪學習完成</h3>
+          <p class="soft-text">今天的進度很棒。</p>
+          <div id="studySummaryStats" class="complete-stats"></div>
+          <button id="studyCompleteCloseBtn" class="primary-btn">返回主畫面</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="tableInsertModal" class="modal hidden">
+    <div class="modal-card small">
+      <div class="modal-head">
+        <h3>插入表格</h3>
+        <button id="closeTableInsertBtn" class="icon-btn" type="button">✕</button>
+      </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label>列數</label>
+          <input type="number" id="tableRowsInput" min="2" max="8" value="2" />
+        </div>
+        <div class="field">
+          <label>欄數</label>
+          <input type="number" id="tableColsInput" min="2" max="8" value="2" />
+        </div>
+        <div class="field full action-row">
+          <button id="cancelTableInsertBtn" class="ghost-btn" type="button">取消</button>
+          <button id="confirmTableInsertBtn" class="primary-btn" type="button">插入</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="lightboxModal" class="lightbox hidden">
+    <button id="lightboxCloseBtn" class="lightbox-close" type="button">✕</button>
+    <img id="lightboxImage" alt="preview" />
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
