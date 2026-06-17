@@ -9221,3 +9221,42 @@ if ("serviceWorker" in navigator) {
   if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
   else document.addEventListener("DOMContentLoaded", boot);
 })();
+/* ===== iPad M7:沉浸閱讀切換鍵 ===== */
+(function(){
+  if(window.__creamyIPadM7) return;
+  window.__creamyIPadM7 = true;
+  const isIPad=()=>matchMedia("(min-width:768px) and (max-width:1366px) and (pointer:coarse)").matches;
+
+  function ensureBtn(){
+    if(!isIPad()) return;
+    const bar=document.getElementById("ipadTopLeft");
+    if(!bar || document.getElementById("ipadImmersiveToggle")) return;
+    const btn=document.createElement("button");
+    btn.id="ipadImmersiveToggle"; btn.type="button";
+    btn.className="ipad-icon-btn"; btn.title="沉浸閱讀(收起上下操作)";
+    btn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+    btn.addEventListener("pointerup", e=>{
+      e.preventDefault();
+      const on=document.body.classList.toggle("ipad-immersive");
+      btn.classList.toggle("is-on", on);
+    }, true);
+    bar.appendChild(btn);
+  }
+
+  function sync(){
+    const v=document.getElementById("studyModeView");
+    const open = isIPad() && v && !v.classList.contains("hidden");
+    if(!open){ document.body.classList.remove("ipad-immersive"); return; }
+    ensureBtn();
+    setTimeout(ensureBtn, 120);   /* 等 M3 先整好 #ipadTopLeft */
+  }
+
+  function boot(){
+    sync();
+    const v=document.getElementById("studyModeView");
+    if(v) new MutationObserver(sync).observe(v,{attributes:true,attributeFilter:["class"]});
+    window.addEventListener("resize", sync);
+  }
+  if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
+  else document.addEventListener("DOMContentLoaded", boot);
+})();
