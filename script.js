@@ -629,8 +629,8 @@ function dataUrlToBlob(dataUrl) {
 
 function defaultState() {
   const now = Date.now();
-  const decks = DEFAULT_DECKS.map((deck, index) => ({
-    id: index === 0 ? "uncategorized" : uid("deck"),
+const decks = DEFAULT_DECKS.map((deck, index) => ({
+    id: index === 0 ? "uncategorized" : `deck-fixed-${index}`,
     name: deck.name,
     color: deck.color,
     protected: !!deck.protected,
@@ -8555,4 +8555,93 @@ if ("serviceWorker" in navigator) {
 
   window.creamyCloudPull = pullState;
   window.creamyCloudPush = pushState;
+})();
+/* =========================================================
+   DECK DEDUPE FIX：清走重複「空白」deck（安全：有卡嘅唔郁）
+   ========================================================= */
+(function () {
+  if (window.__creamyDeckDedupe) return;
+  window.__creamyDeckDedupe = true;
+
+  let busy = false;
+
+  function dedupeDecksSafe() {
+    if (!appState?.decks?.length) return { changed: false, removed: 0 };
+
+    const noteCount = {};
+    appState.notes.forEach(n => {
+      noteCount[n.deckId] = (noteCount[n.deckId] || 0) + 1;
+    });
+
+    const groups = new Map();
+    appState.decks.forEach(d => {
+      const key = String(d.name || "").trim();
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(d);
+    });
+
+    const removedIds = [];
+
+    groups.forEach(list => {
+      if (list.length <= 1) return;
+
+      const withNotes = list.filter(d => (noteCount[d.id] || 0) > 0);
+      const empty = list.filter(d => (noteCount[d.id] || 0) === 0);
+
+      if (withNotes.length > 0) {
+        // 有卡嘅全部保留；只刪走同名嘅「空白」重複
+        empty.forEach(d => {
+          if (d.id === "uncategorized" || d.protected) return;
+          removedIds.push(d.id);
+        });
+      } else {
+        // 全部都係空：deterministic 保留一個，其餘刪
+        list.sort((a, b) => {
+          if (a.id === "uncategorized") return -1;
+          if (b.id === "uncategorized") return 1;
+          if (!!b.protected !== !!a.protected) return (b.protected ? 1 : 0) - (a.protected ? 1 : 0);
+          if ((a.createdAt || 0) !== (b.createdAt || 0)) return (a.createdAt || 0) - (b.createdAt || 0);
+          return String(a.id).localeCompare(String(b.id));
+        });
+        list.slice(1).forEach(d => removedIds.push(d.id));
+      }
+    });
+
+    if (!removedIds.length) return { changed: false, removed: 0 };
+
+    const removed = new Set(removedIds);
+    appState.decks = appState.decks.filter(d => !removed.has(d.id));
+
+    if (!appState.decks.some(d => d.id === "uncategorized")) {
+      appState.decks.unshift({
+        id: "uncategorized", name: "Uncategorized",
+        color: "#eeeeee", protected: true, createdAt: Date.now()
+      });
+    }
+
+    return { changed: true, removed: removedIds.length };
+  }
+
+  async function run() {
+    if (busy || !appState) return;
+    const res = dedupeDecksSafe();
+    if (!res.changed) return;
+
+    busy = true;
+    try {
+      requestSave("已清理重複 Deck");     // 觸發 push → 雲端會一齊刪走
+      showToast("已清理重複 Deck", `移除 ${res.removed} 個空白重複資料夾`, "success");
+      if (typeof renderAll === "function") await renderAll();
+    } finally {
+      setTimeout(() => { busy = false; }, 600);
+    }
+  }
+
+  creamyFinalWhenReady(() => {
+    setTimeout(run, 2500);          // 等開機 pull 完
+    setTimeout(run, 6500);          // 再 check 一次（網絡慢）
+    setInterval(run, 30000);        // 之後其他機 sync 入嚟都會清
+  });
+
+  window.creamyDeckDedupeNow = run; // 想即刻清可以 console 打呢個
 })();
