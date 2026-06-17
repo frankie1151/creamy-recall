@@ -4059,3 +4059,50 @@ button, a, select, input, label,
   /* 翻卡模式喺 iPad 收起(避免又疊又亂);全程用 split */
   body.ipad-force-split #studyCardFlip{ display:none !important; }
 }
+/* ===== iPad M5:頂欄修正 + 強制左右對照 + preview 位置/高度 ===== */
+@media (min-width:768px) and (max-width:1366px) and (pointer:coarse){
+
+  /* (5) 頂欄永遠橫向、佔滿闊度,唔再變直書 */
+  .study-shell .study-topbar{
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+  .study-shell .study-progress-wrap,
+  .study-shell .study-inline-editbar{
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+  }
+  .study-topbar > div:first-child{ flex: 1 1 auto; min-width: 0; }
+  .study-topbar .study-top-actions{
+    width: auto !important;
+    margin-left: auto;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+  }
+  .study-topbar .study-top-actions .ghost-btn{
+    width: auto !important;
+    flex: 0 0 auto;
+    white-space: nowrap !important;
+    writing-mode: horizontal-tb !important;
+  }
+  .study-topbar h3,
+  .study-topbar p{
+    writing-mode: horizontal-tb !important;
+    white-space: normal !important;
+  }
+
+  /* (2) preview 區往下,唔好擋住左上兩個圓掣;圓掣加大易撳 */
+  .study-shell.study-with-rail #studyPreviewRail{ margin-top: 52px !important; }
+  .ipad-icon-btn{ width: 46px !important; height: 46px !important; }
+
+  /* (1) 左邊唔好空:rail 拉高 + 卡矮少少 = 多睇幾張 */
+  .study-shell.study-with-rail #studyPreviewRail{ max-height: calc(100vh - 70px) !important; }
+  .study-shell.study-with-rail .study-preview-card{
+    --study-preview-card-height: 186px !important;
+  }
+}
