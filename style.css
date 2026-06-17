@@ -4025,3 +4025,37 @@ button, a, select, input, label,
   #studyRailResizer::before{ width:6px; }
   #studyRailResizer.dragging::before{ width:8px; }
 }
+/* ===== iPad M4:左右對照(split)橫向三格 + 易拖 resizer ===== */
+@media (min-width:768px) and (max-width:1366px) and (pointer:coarse){
+
+  /* studyStage 唔好限高,等 split 食滿 */
+  #studyStage{ min-height:0; }
+  #studyStage .study-card-stack{ height:100%; display:flex; flex-direction:column; }
+
+  /* 強制 split 橫向:問題 | 拖拉條 | 答案 */
+  #studyCardSplit:not(.hidden){
+    display:grid !important;
+    grid-template-columns: var(--ipad-split-q, 1fr) 14px minmax(0,1fr) !important;
+    align-items:stretch; gap:0; flex:1; min-height:0;
+  }
+  #studyCardSplit .split-panel.left{ grid-column:1; min-width:0; overflow:auto; }
+  #studyCardSplit .split-panel.right{ grid-column:3; min-width:0; overflow:auto; }
+
+  #studySplitResizer{
+    grid-column:2; position:relative; align-self:stretch;
+    width:auto; background:transparent;
+    cursor:col-resize; touch-action:none;
+  }
+  #studySplitResizer::before{
+    content:""; position:absolute; top:0; bottom:0; left:50%;
+    width:6px; transform:translateX(-50%); border-radius:999px;
+    background:color-mix(in srgb,var(--primary) 55%, var(--card-strong));
+    transition:background .15s ease;
+  }
+  /* 隱形擴大觸控區,易抓 */
+  #studySplitResizer::after{ content:""; position:absolute; inset:-12px -16px; }
+  #studySplitResizer.dragging::before{ width:8px; background:var(--primary-strong); }
+
+  /* 翻卡模式喺 iPad 收起(避免又疊又亂);全程用 split */
+  body.ipad-force-split #studyCardFlip{ display:none !important; }
+}
