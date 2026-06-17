@@ -8645,3 +8645,73 @@ if ("serviceWorker" in navigator) {
 
   window.creamyDeckDedupeNow = run; // 想即刻清可以 console 打呢個
 })();
+/* =========================================================
+   iOS 翻卡單擊修正:用 pointerup 取代 click
+   原因:翻卡內容 .study-content 係 overflow:auto,
+   iOS 會食咗第一下 synthetic click。pointerup 唔受影響。
+   ========================================================= */
+(function patchIOSFlipTap() {
+  function ready() {
+    const flip = document.getElementById("studyCardFlip");
+    const inner = document.getElementById("studyCardInner");
+
+    if (!flip || !inner) {
+      setTimeout(ready, 200);
+      return;
+    }
+
+    if (inner.dataset.iosTapPatched === "1") return;
+    inner.dataset.iosTapPatched = "1";
+
+    /*
+      1. 喺 capture 階段攔截舊 click 翻卡,
+         避免 pointerup 翻完之後,舊 click 又翻多次。
+    */
+    flip.addEventListener("click", e => {
+      if (e.target.closest("#studyCardInner")) {
+        e.stopImmediatePropagation();
+      }
+    }, true);
+
+    /*
+      2. 用 pointer 做「一 tap 一翻」,並偵測移動以區分捲動。
+    */
+    let sx = 0, sy = 0, st = 0, moved = false, active = false;
+
+    inner.addEventListener("pointerdown", e => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      active = true;
+      moved = false;
+      sx = e.clientX;
+      sy = e.clientY;
+      st = Date.now();
+    }, { passive: true });
+
+    inner.addEventListener("pointermove", e => {
+      if (!active) return;
+      if (Math.abs(e.clientX - sx) > 12 || Math.abs(e.clientY - sy) > 12) {
+        moved = true;
+      }
+    }, { passive: true });
+
+    inner.addEventListener("pointerup", e => {
+      if (!active) return;
+      active = false;
+
+      if (moved) return;                 // 係捲動,唔翻
+      if (Date.now() - st > 600) return; // 長按,唔翻
+
+      if (typeof studyInlineEditing !== "undefined" && studyInlineEditing) return;
+      if (e.target.closest("img, a, button, .inline-image-box")) return;
+
+      if (typeof toggleStudyReveal === "function") toggleStudyReveal();
+    });
+
+    inner.addEventListener("pointercancel", () => {
+      active = false;
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", ready);
+  ready();
+})();
