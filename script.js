@@ -8715,3 +8715,68 @@ if ("serviceWorker" in navigator) {
   document.addEventListener("DOMContentLoaded", ready);
   ready();
 })();
+/* =========================================================
+   iOS 預覽卡單擊修正:用 pointerup 委派取代 click
+   原因:.study-preview-rail 係 overflow:auto,
+   同翻卡一樣會被 iOS 食咗第一下 synthetic click。
+   預覽卡係動態重畫,所以用 document 委派。
+   ========================================================= */
+(function patchIOSPreviewTap() {
+  if (window.__iosPreviewTapPatched) return;
+  window.__iosPreviewTapPatched = true;
+
+  /*
+    1. capture 階段攔截舊 click,
+       避免 pointerup 跳卡之後 click 又再觸發一次。
+  */
+  document.addEventListener("click", e => {
+    if (e.target.closest("[data-study-preview-note]")) {
+      e.stopImmediatePropagation();
+    }
+  }, true);
+
+  /*
+    2. 用 pointer 做委派,一 tap 一跳,並偵測移動區分捲動。
+  */
+  let sx = 0, sy = 0, st = 0, moved = false, active = false, target = null;
+
+  document.addEventListener("pointerdown", e => {
+    const card = e.target.closest("[data-study-preview-note]");
+    if (!card) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+
+    active = true;
+    moved = false;
+    target = card;
+    sx = e.clientX;
+    sy = e.clientY;
+    st = Date.now();
+  }, { passive: true });
+
+  document.addEventListener("pointermove", e => {
+    if (!active) return;
+    if (Math.abs(e.clientX - sx) > 12 || Math.abs(e.clientY - sy) > 12) {
+      moved = true;
+    }
+  }, { passive: true });
+
+  document.addEventListener("pointerup", e => {
+    if (!active) return;
+    active = false;
+
+    const card = e.target.closest("[data-study-preview-note]");
+    if (!card || card !== target) return;  // 唔同一張卡,當捲動
+    if (moved) return;                      // 係捲動,唔跳
+    if (Date.now() - st > 600) return;      // 長按,唔跳
+
+    const noteId = card.dataset.studyPreviewNote;
+    if (noteId && typeof jumpStudyPreviewByNoteFinal === "function") {
+      jumpStudyPreviewByNoteFinal(noteId);
+    }
+  });
+
+  document.addEventListener("pointercancel", () => {
+    active = false;
+    target = null;
+  });
+})();
