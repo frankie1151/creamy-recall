@@ -9015,3 +9015,79 @@ if ("serviceWorker" in navigator) {
   if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
   else document.addEventListener("DOMContentLoaded", boot);
 })();
+/* ===== iPad M4:自動用 split + split resizer 觸控 ===== */
+(function(){
+  if(window.__creamyIPadM4) return;
+  window.__creamyIPadM4 = true;
+  const isIPad=()=>matchMedia("(min-width:768px) and (max-width:1366px) and (pointer:coarse)").matches;
+  const SPLIT_KEY="creamy.ipad.splitQ";
+
+  /* 開學習模式設定時,iPad 預設揀「左右對照」 */
+  function defaultSplit(){
+    if(!isIPad()) return;
+    const sel=document.getElementById("studyViewModeInput");
+    if(sel) sel.value="split";
+  }
+
+  /* split 拖拉條加觸控 */
+  function bindSplitResizer(){
+    if(!isIPad()) return;
+    const split=document.getElementById("studyCardSplit");
+    const handle=document.getElementById("studySplitResizer");
+    if(!split||!handle||handle.dataset.ipadBound) return;
+    handle.dataset.ipadBound="1";
+
+    const saved=parseInt(localStorage.getItem(SPLIT_KEY)||"",10);
+    if(saved) split.style.setProperty("--ipad-split-q", saved+"px");
+
+    let active=false;
+    handle.addEventListener("pointerdown",e=>{
+      active=true; handle.classList.add("dragging");
+      try{handle.setPointerCapture(e.pointerId);}catch{}
+      e.preventDefault();
+    });
+    handle.addEventListener("pointermove",e=>{
+      if(!active) return;
+      const r=split.getBoundingClientRect();
+      const w=Math.max(220, Math.min(r.width-220, e.clientX-r.left));
+      split.style.setProperty("--ipad-split-q", w+"px");
+    });
+    const end=()=>{
+      if(!active) return;
+      active=false; handle.classList.remove("dragging");
+      const w=parseInt(split.style.getPropertyValue("--ipad-split-q"),10);
+      if(w) localStorage.setItem(SPLIT_KEY, String(w));
+    };
+    handle.addEventListener("pointerup",end);
+    handle.addEventListener("pointercancel",end);
+  }
+
+  function syncSplit(){
+    if(!isIPad()){ document.body.classList.remove("ipad-force-split"); return; }
+    const view=document.getElementById("studyModeView");
+    const open=view && !view.classList.contains("hidden");
+    document.body.classList.toggle("ipad-force-split", !!open);
+    if(open) bindSplitResizer();
+  }
+
+  function boot(){
+    defaultSplit(); syncSplit();
+
+    const view=document.getElementById("studyModeView");
+    if(view) new MutationObserver(syncSplit)
+      .observe(view,{attributes:true,attributeFilter:["class"]});
+
+    const pref=document.getElementById("studyPreferenceModal");
+    if(pref) new MutationObserver(()=>{ 
+      if(!pref.classList.contains("hidden")) defaultSplit();
+    }).observe(pref,{attributes:true,attributeFilter:["class"]});
+
+    const stage=document.getElementById("studyStage");
+    if(stage) new MutationObserver(()=>{ if(isIPad()) bindSplitResizer(); })
+      .observe(stage,{childList:true,subtree:true});
+
+    window.addEventListener("resize", syncSplit);
+  }
+  if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
+  else document.addEventListener("DOMContentLoaded", boot);
+})();
