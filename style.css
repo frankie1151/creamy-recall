@@ -3878,3 +3878,106 @@ button, a, select, input, label,
   -webkit-user-select: text !important;
   user-select: text !important;
 }
+/* =========================================================
+   iPad 樣板 M2:可拖拉 preview、收起頂欄、長按選單、精簡編輯器
+   只用 media query + localStorage,唔寫 app_state,唔同步
+   範圍:768–1366 且係觸控裝置(iPad)
+   ========================================================= */
+@media (min-width: 768px) and (max-width: 1366px) and (pointer: coarse) {
+
+  /* ---------- 首頁更精簡、比例更合理 ---------- */
+  .app-shell { grid-template-columns: 226px 1fr; gap: 16px; padding: 16px; }
+  .sidebar { position: sticky; top: 16px; }
+  .stats-grid { grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat-card { padding: 14px; }
+  .stat-card strong { font-size: 28px; }
+  .subject-grid { grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 12px; }
+  .subject-deck { min-height: 104px; padding: 14px; }
+  .page-header h2 { font-size: clamp(26px, 3vw, 40px); }
+  .notes-wall { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+
+  /* ---------- 學習模式:三欄 = 清單 | 拖拉條 | 卡片 ---------- */
+  .study-shell.study-with-rail {
+    grid-template-columns: var(--ipad-rail-width, 290px) 12px minmax(0, 1fr) !important;
+  }
+  .study-shell.study-with-rail #studyPreviewRail {
+    grid-column: 1 !important;
+    position: sticky !important;
+    max-height: calc(100vh - 120px) !important;
+  }
+  .study-shell.study-with-rail #studyStage,
+  .study-shell.study-with-rail #studyCompleteState { grid-column: 3 !important; }
+
+  #studyRailResizer {
+    grid-column: 2;
+    align-self: stretch;
+    position: relative;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  #studyRailResizer::before {
+    content: "";
+    position: absolute; top: 0; bottom: 0; left: 50%;
+    width: 5px; transform: translateX(-50%);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 55%, var(--card-strong));
+    transition: background .15s ease;
+  }
+  #studyRailResizer.dragging::before { background: var(--primary-strong); width: 6px; }
+
+  /* preview 卡片矮少少,iPad 慳位 */
+  .study-shell.study-with-rail .study-preview-card { --study-preview-card-height: 226px; }
+
+  /* ---------- 收起「圈住區」(頂欄 + 進度),可按需顯示 ---------- */
+  body.ipad-chrome-hidden .study-topbar,
+  body.ipad-chrome-hidden .study-progress-wrap { display: none !important; }
+
+  #ipadChromeToggle {
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+    z-index: 240;
+    height: 38px; padding: 0 14px;
+    display: inline-flex; align-items: center; gap: 6px;
+    border-radius: 999px; border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--card-strong) 94%, transparent);
+    box-shadow: var(--shadow-soft); backdrop-filter: blur(10px);
+    font-weight: 800; font-size: 13px; color: var(--text);
+  }
+  #ipadChromeToggle:active { opacity: .82; }
+
+  /* 收起時保留一個快速離開鍵,唔會卡死 */
+  #ipadQuickExit {
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top));
+    left: calc(10px + env(safe-area-inset-left));
+    z-index: 240;
+    height: 38px; padding: 0 14px;
+    border-radius: 999px; border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--danger) 16%, var(--card-strong));
+    box-shadow: var(--shadow-soft);
+    font-weight: 800; font-size: 13px; color: var(--text);
+    display: none;
+  }
+  body.ipad-chrome-hidden #ipadQuickExit { display: inline-flex; }
+
+  /* ---------- 精簡編輯器,唔好佔太多位 ---------- */
+  .editor-toolbar { gap: 6px; }
+  .editor-toolbar .toolbar-sep,
+  .editor-toolbar [data-action="insert-table"],
+  .editor-toolbar [data-color="#376fa8"],
+  .editor-toolbar [data-color="#3d7d52"] { display: none; }
+  .rich-editor { min-height: 128px; }
+  .note-modal-card { width: min(900px, 100%); }
+  .compact-meta-grid { grid-template-columns: repeat(2, 1fr); }
+
+  .study-inline-editbar { gap: 6px; padding: 8px 10px; }
+  .study-inline-editbar .toolbar-sep,
+  .study-inline-editbar [data-study-action="insert-table"] { display: none; }
+
+  /* ---------- 長按唔好彈系統選字 ---------- */
+  [data-context-note],
+  [data-context-deck],
+  [data-study-preview-note],
+  #subjectDeckGrid .deck-wrap { -webkit-touch-callout: none; }
+}
