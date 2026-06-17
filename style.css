@@ -3803,3 +3803,39 @@ body[data-theme="night"] .context-menu {
   opacity: 0.55;
   order: 9999;
 }
+/* =========================================================
+   觸控裝置：停用 hover 位移，修正「要撳幾次」
+   ========================================================= */
+@media (hover: none) {
+  .nav-btn:hover,
+  .hero-btn:hover,
+  .primary-btn:hover,
+  .ghost-btn:hover,
+  .mini-btn:hover,
+  .deck-study-btn:hover,
+  .tool-btn:hover,
+  .tiny-btn:hover,
+  .icon-btn:hover,
+  .wall-card:hover,
+  .subject-deck:hover,
+  .study-preview-card:hover,
+  .theme-option:hover,
+  .stat-card:hover,
+  .task-card:hover,
+  .review-card:hover {
+    transform: none !important;
+  }
+
+  /* 用 :active 做即時回饋，唔影響 click 命中 */
+  .hero-btn:active,
+  .primary-btn:active,
+  .ghost-btn:active,
+  .mini-btn:active,
+  .nav-btn:active,
+  .deck-study-btn:active,
+  .wall-card:active,
+  .subject-deck:active,
+  .study-preview-card:active {
+    opacity: 0.82;
+  }
+}
