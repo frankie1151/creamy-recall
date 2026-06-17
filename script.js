@@ -9260,3 +9260,62 @@ if ("serviceWorker" in navigator) {
   if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
   else document.addEventListener("DOMContentLoaded", boot);
 })();
+/* ===== iPad/iOS M8:study 按鈕單擊修正(顯示答案/忘了/下一張等) ===== */
+(function(){
+  if(window.__creamyIPadM8) return;
+  window.__creamyIPadM8 = true;
+
+  /* 只處理冇被程式 .click() 觸發嘅按鈕,避免同 M3/M5/M6 撞 */
+  const MAP = {
+    studyForgotBtn:      () => (window.applyStudyAction||applyStudyAction)("forgot"),
+    studyOkayBtn:        () => (window.applyStudyAction||applyStudyAction)("okay"),
+    studyRememberedBtn:  () => (window.applyStudyAction||applyStudyAction)("remembered"),
+    studyMasteredBtn:    () => (window.applyStudyAction||applyStudyAction)("mastered"),
+    studyLaterBtn:       () => (window.applyStudyAction||applyStudyAction)("later"),
+    studyPrevBtn:        () => (window.studyPrev||studyPrev)(),
+    studyNextBtn:        () => (window.studyNext||studyNext)(),
+    studyFlipBtn:        () => toggleStudyReveal(),
+    studyCompleteCloseBtn:()=> (window.closeStudyMode||closeStudyMode)(),
+    studySplitRevealBtn: () => {
+      studyState.answerVisible = true;
+      updateStudySplitAnswerVisibility();
+      updateStudyFlipButtonLabel();
+    }
+  };
+
+  function idOf(target){
+    const btn = target.closest && target.closest("button[id]");
+    return btn && MAP[btn.id] ? btn.id : "";
+  }
+
+  /* 1) 殺死 native click:避免第一下被食 + 之後 double */
+  document.addEventListener("click", e=>{
+    if(idOf(e.target)){ e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
+
+  /* 2) pointerup 做唯一觸發,mouse / touch 都一 tap 一次 */
+  let sx=0, sy=0, st=0, moved=false, active=false, downId="";
+
+  document.addEventListener("pointerdown", e=>{
+    const id = idOf(e.target);
+    if(!id) return;
+    if(e.pointerType==="mouse" && e.button!==0) return;
+    active=true; moved=false; downId=id;
+    sx=e.clientX; sy=e.clientY; st=Date.now();
+  }, true);
+
+  document.addEventListener("pointermove", e=>{
+    if(active && (Math.abs(e.clientX-sx)>12 || Math.abs(e.clientY-sy)>12)) moved=true;
+  }, true);
+
+  document.addEventListener("pointerup", e=>{
+    if(!active) return;
+    active=false;
+    const id = idOf(e.target);
+    if(!id || id!==downId || moved) return;   // 滑走/捲動 = 唔觸發
+    if(Date.now()-st>700) return;              // 長按唔觸發
+    try{ MAP[id](); }catch(err){ console.error(err); }
+  }, true);
+
+  document.addEventListener("pointercancel", ()=>{ active=false; }, true);
+})();
