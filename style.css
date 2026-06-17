@@ -4106,3 +4106,63 @@ button, a, select, input, label,
     --study-preview-card-height: 186px !important;
   }
 }
+/* ===== iPad M6:乾淨頂欄 + Q/A 拖拉 + 顯示答案置頂 ===== */
+@media (min-width:768px) and (max-width:1366px) and (pointer:coarse){
+
+  /* (1)(5) 原生頂欄 + 進度條收起,改用浮動掣,永不走樣 */
+  .study-shell .study-topbar,
+  .study-shell .study-progress-wrap{ display:none !important; }
+  #ipadChromeToggle, #ipadQuickExit{ display:none !important; }
+
+  /* (3) 頂部預留 strip 俾浮動掣,內容唔被擋 */
+  .study-shell{ padding-top:60px !important; }
+  #ipadTopLeft{ top:calc(10px + env(safe-area-inset-top)) !important; }
+  .ipad-icon-btn{ width:46px !important; height:46px !important; }
+
+  /* preview rail 貼住預留區下面 */
+  .study-shell.study-with-rail #studyPreviewRail{
+    margin-top:0 !important;
+    max-height:calc(100vh - 76px) !important;
+  }
+
+  /* (2) 強制顯示中間拖拉條(覆蓋舊 max-width:1200px 嘅 display:none) */
+  #studySplitResizer{
+    display:block !important;
+    grid-column:2 !important;
+    position:relative !important;
+    width:auto !important;
+    background:transparent !important;
+    cursor:col-resize !important;
+    touch-action:none !important;
+    z-index:6 !important;
+  }
+  #studySplitResizer::before{
+    content:"" !important;
+    position:absolute !important; top:0; bottom:0; left:50%;
+    width:6px !important; transform:translateX(-50%);
+    border-radius:999px;
+    background:color-mix(in srgb,var(--primary) 60%, var(--card-strong)) !important;
+  }
+  #studySplitResizer::after{          /* 隱形擴大觸控區,易抓 */
+    content:"" !important;
+    position:absolute !important; inset:-10px -18px !important;
+  }
+  #studySplitResizer.dragging::before{ width:8px !important; background:var(--primary-strong) !important; }
+
+  /* (4) 鎖死 split 高度,內容喺格內捲動,唔再越拉越長 */
+  #studyStage{ min-height:0 !important; }
+  #studyStage .study-card-stack{ height:auto !important; display:block !important; }
+  #studyCardSplit:not(.hidden){
+    height:calc(100vh - 220px) !important;
+    min-height:380px !important;
+  }
+  #studyCardSplit .split-panel{ height:100% !important; min-height:0 !important; }
+
+  /* (4) 「顯示答案」釘喺答案格最頂,唔使捲到底 */
+  #studySplitAnswerPanel .split-answer-cover{
+    inset:0 !important;
+    place-items:start center !important;
+    padding-top:16px !important;
+    z-index:7 !important;
+  }
+}
