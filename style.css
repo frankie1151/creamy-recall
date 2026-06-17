@@ -4190,3 +4190,17 @@ button, a, select, input, label,
     border-color:var(--primary) !important;
   }
 }
+/* ===== iPad M8:沉浸模式強制全寬,消除左邊空格 ===== */
+@media (min-width:768px) and (max-width:1366px) and (pointer:coarse){
+  body.ipad-immersive .study-shell.study-with-rail{
+    grid-template-columns: minmax(0,1fr) !important;
+  }
+  body.ipad-immersive #studyPreviewRail,
+  body.ipad-immersive #studyRailResizer{
+    display:none !important;
+  }
+  body.ipad-immersive #studyStage,
+  body.ipad-immersive #studyCompleteState{
+    grid-column:1 !important;
+  }
+}
