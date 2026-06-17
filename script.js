@@ -1535,35 +1535,6 @@ function renderStats() {
   els.statStreak.textContent = appState.progress.streakDays || 0;
 }
 
-function renderSubjectDecks() {
-  els.subjectDeckGrid.innerHTML = appState.decks.map(deck => {
-    const stats = getDeckStats(deck.id);
-
-    return `
-      <div class="deck-wrap">
-        <button class="subject-deck" style="--deck-color:${escapeAttr(deck.color)}" onclick="openDeckWall('${escapeAttr(deck.id)}')">
-          <div class="subject-deck-top">
-            <span class="deck-name">${escapeHtml(deck.name)}</span>
-            <strong>${stats.total}</strong>
-          </div>
-          <div class="soft-text">${stats.due} 張到期 · ${stats.mastered} 張熟記</div>
-          <div class="subject-deck-bottom">
-            <span>⚡ ${stats.due}</span>
-            <span>★ ${stats.starred}</span>
-          </div>
-        </button>
-
-        <div class="deck-actions-row">
-          <button class="deck-study-btn" onclick="openStudyPreference({type:'deck', deckId:'${escapeAttr(deck.id)}'})">開始複習</button>
-          <button class="deck-study-btn" onclick="openModal(null, { deckId:'${escapeAttr(deck.id)}' })">新增卡片</button>
-          <button class="tiny-btn" onclick="openDeckModal('${escapeAttr(deck.id)}')">改</button>
-          <button class="tiny-btn" onclick="deleteDeck('${escapeAttr(deck.id)}')">刪</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-}
-
 function renderTodayTasks() {
   const today = todayStr();
   const tasks = appState.notes
@@ -1654,60 +1625,6 @@ function renderDeckWallHeader() {
   `;
 }
 
-function renderNotes() {
-  populateDeckSelects();
-  if (currentDeckWall) els.filterDeck.value = currentDeckWall;
-  renderDeckWallHeader();
-
-  const notes = getFilteredNotes().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-
-  if (!notes.length) {
-    els.notesList.innerHTML = `<div class="empty-state">目前沒有符合條件的卡片。</div>`;
-    return;
-  }
-
-  els.notesList.innerHTML = notes.map(note => {
-    const title = getPlainPreviewFromHtml(note.questionHtml, 42);
-    const previewText = getPlainPreviewFromHtml(note.answerHtml, 58);
-    const deck = getDeck(note.deckId);
-    const fitClass = getFitClass(stripHtml(note.questionHtml));
-
-    return `
-      <div class="wall-card creamy-card">
-        <div class="wall-card-top">
-          <div class="wall-card-tags">
-            <span class="mini-dot" style="--dot-color:${escapeAttr(deck.color)}"></span>
-            <span>${escapeHtml(deck.name)}</span>
-          </div>
-          <button class="star-btn ${note.starred ? "active" : ""}" onclick="toggleStar('${escapeAttr(note.id)}')">${note.starred ? "★" : "☆"}</button>
-        </div>
-
-        <div class="wall-title ${fitClass}" onclick="openEditModal('${escapeAttr(note.id)}')">${escapeHtml(title || "無文字問題")}</div>
-        <div class="wall-preview" onclick="openEditModal('${escapeAttr(note.id)}')">${escapeHtml(previewText || " ")}</div>
-
-        <div class="curve-row">
-          <span class="curve-chip">${escapeHtml(getCurveStageLabel(note.reviewStage))}</span>
-          <select class="curve-select" onchange="updateCurveStage('${escapeAttr(note.id)}', this.value)">
-            ${CURVE_DAYS.map((days, idx) => `<option value="${idx}" ${note.reviewStage === idx ? "selected" : ""}>${escapeHtml(getCurveStageLabel(idx))}</option>`).join("")}
-          </select>
-        </div>
-
-        <div class="wall-footer">
-          <span class="wall-state ${getStudyState(note)}">${escapeHtml(getStudyStateLabel(note))}</span>
-          <span class="wall-badge ${note.importance}">${escapeHtml(getImportanceLabel(note.importance))}</span>
-          <span class="wall-badge difficulty ${note.difficulty}">${escapeHtml(getDifficultyLabel(note.difficulty))}</span>
-        </div>
-
-        <div class="card-action-row">
-          <button class="mini-btn" onclick="openEditModal('${escapeAttr(note.id)}')">編輯</button>
-          <button class="mini-btn" onclick="openStudyPreference({type:'single', noteId:'${escapeAttr(note.id)}'})">開始複習</button>
-          <button class="mini-btn danger-lite" onclick="deleteNote('${escapeAttr(note.id)}')">刪除</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-}
-
 function renderCalendar() {
   const d = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth(), 1);
   const month = d.getMonth();
@@ -1763,33 +1680,6 @@ function buildCalendarCell(dateObj, muted) {
       <div class="dot-row">${dots}</div>
     </button>
   `;
-}
-
-function renderSelectedDateTasks() {
-  els.selectedDateLabel.textContent = formatDisplayDate(selectedDateTasks ? selectedCalendarDate : todayStr());
-  const notes = appState.notes.filter(note => note.nextReviewDate === selectedCalendarDate || note.createdAt === selectedCalendarDate);
-
-  if (!notes.length) {
-    els.selectedDateTasks.innerHTML = `<div class="empty-state">目前沒有內容。</div>`;
-    return;
-  }
-
-  els.selectedDateTasks.innerHTML = notes.map(note => `
-    <div class="task-card">
-      <div class="task-top">
-        <div>
-          <h4 class="task-title">${escapeHtml(getPlainPreviewFromHtml(note.questionHtml, 52))}</h4>
-          <div class="soft-text">${escapeHtml(getDeckName(note.deckId))} · ${escapeHtml(getCurveStageLabel(note.reviewStage))}</div>
-        </div>
-        <span class="badge ${note.importance}">${escapeHtml(getImportanceLabel(note.importance))}</span>
-      </div>
-
-      <div class="badge-row">
-        <span class="badge difficulty ${note.difficulty}">${escapeHtml(getDifficultyLabel(note.difficulty))}</span>
-        <span class="badge">${escapeHtml(getStudyStateLabel(note))}</span>
-      </div>
-    </div>
-  `).join("");
 }
 
 function renderCake() {
@@ -4273,16 +4163,6 @@ function getStudyPreviewFitClassFinal(text) {
   if (len > 74) return "preview-fit-medium";
 
   return "preview-fit-normal";
-}
-
-function noteMatchesStudyPreviewSearchFinal(note, query) {
-  const q = creamyFinalNormalizeText(query);
-
-  if (!q) return true;
-
-  const haystack = creamyFinalNormalizeText(creamyFinalGetNoteText(note));
-
-  return haystack.includes(q);
 }
 
 function getStudyPreviewCandidatesFinal() {
