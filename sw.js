@@ -1,39 +1,41 @@
-"use strict";
-
-/* ---------- constants ---------- */
-
-const STATE_DB_NAME = "creamyRecallStateDB_v2";
-const STATE_DB_VERSION = 1;
-const STATE_STORE = "kv";
-const STATE_KEY = "app-state";
-
-const FILE_DB_NAME = "creamyRecallFilesDB_v2";
-const FILE_DB_VERSION = 1;
-const FILE_STORE = "files";
-
-const LEGACY_KEYS = [
-  "creamyRecallData_v10",
-  "creamyRecallData_v9",
-  "creamyRecallData_v8",
-  "creamyRecallData_v7",
-  "creamyRecallData_v6",
-  "creamyRecallData_v5",
-  "creamyRecallData_v4"
+const CACHE_NAME = "creamy-recall-cache-v22";
+const ASSETS = [
+  "./",
+  "./index.html",
+  "./style.css",
+  "./script.js",
+  "./manifest.webmanifest",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png"
 ];
 
-const CURVE_DAYS = [0, 1, 3, 7, 14, 30, 60, 90];
+self.addEventListener("install", event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
+  );
+  self.skipWaiting();
+});
 
-const DEFAULT_DECKS = [
-  { name: "Uncategorized", color: "#eeeeee", protected: true },
-  { name: "內科", color: "#dcecff" },
-  { name: "外科", color: "#eadfff" },
-  { name: "其他", color: "#ececec" },
-  { name: "婦產科", color: "#ffe0eb" },
-  { name: "兒科", color: "#ffe6cf" },
-  { name: "衛生中心", color: "#dff5ff" },
-  { name: "物理治療", color: "#def4df" },
-  { name: "急診", color: "#ffe1dd" },
-  { name: "藥學", color: "#e7dcff" }
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(
+        keys.map(key => {
+          if (key !== CACHE_NAME) return caches.delete(key);
+        })
+      )
+    )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener("fetch", event => {
+  if (event.request.method !== "GET") return;
+
+  event.respondWith(
+    caches.match(event.request).then(cached => cached || fetch(event.request))
+  );
+});
 ];
 
 const THEMES = {
