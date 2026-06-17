@@ -4166,3 +4166,27 @@ button, a, select, input, label,
     z-index:7 !important;
   }
 }
+/* ===== iPad M7:沉浸閱讀(一鍵收起上下操作,Q/A 食滿) ===== */
+@media (min-width:768px) and (max-width:1366px) and (pointer:coarse){
+
+  /* 收起上方 badge 列 + 下方所有操作 + 常漏點 */
+  body.ipad-immersive .study-meta-row,
+  body.ipad-immersive .study-bottom-layout,
+  body.ipad-immersive #studyMissedPointZone{
+    display:none !important;
+  }
+
+  /* Q/A 格子拉長,佔返收起嗰啲空間 */
+  body.ipad-immersive #studyCardSplit:not(.hidden){
+    height:calc(100vh - 84px) !important;
+  }
+  body.ipad-immersive #studyCardFlip .study-card-inner{
+    height:calc(100vh - 84px) !important;
+  }
+
+  /* 沉浸鍵 on 狀態 */
+  #ipadImmersiveToggle.is-on{
+    background:color-mix(in srgb, var(--primary) 26%, var(--card-strong)) !important;
+    border-color:var(--primary) !important;
+  }
+}
