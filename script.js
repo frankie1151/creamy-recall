@@ -9159,34 +9159,42 @@ if ("serviceWorker" in navigator) {
 })();
 
 
-/* ---- (2) iPad 沉浸模式仍可開 preview(浮動 overlay) ---- */
+/* ---- (2) iPad 沉浸模式仍可開 preview(浮動 overlay)---- */
 (function () {
   if (window.__creamyIPadM9) return;
   window.__creamyIPadM9 = true;
   const isIPad = () =>
     matchMedia("(min-width:768px) and (max-width:1366px) and (pointer:coarse)").matches;
 
-  /*
-    用 window 嘅 capture handler:會喺 M5 嘅 document handler 之前行,
-    咁就可以喺沉浸模式攔截,唔俾 M5 嘅 ipad-rail-hidden 邏輯搞亂。
-  */
+  // 開關 overlay
   window.addEventListener("pointerup", e => {
     const btn = e.target.closest && e.target.closest("#ipadPreviewToggle");
     if (!btn || !isIPad()) return;
-    if (!document.body.classList.contains("ipad-immersive")) return; // 非沉浸:交返 M5 處理
+    if (!document.body.classList.contains("ipad-immersive")) return;
 
     e.preventDefault();
-    e.stopImmediatePropagation(); // 阻止 M5
+    e.stopImmediatePropagation();
     window.__ipadPrevSuppress = true;
     const open = document.body.classList.toggle("ipad-immersive-preview");
     btn.classList.toggle("is-on", open);
     setTimeout(() => { window.__ipadPrevSuppress = false; }, 500);
   }, true);
 
-  // 喺沉浸 overlay 揀完一張卡,自動收返 overlay
+  /* ★ 分辨 tap vs scroll:記低落手位置 */
+  let downX = 0, downY = 0, downT = 0;
+  document.addEventListener("pointerdown", e => {
+    downX = e.clientX; downY = e.clientY; downT = Date.now();
+  }, true);
+
+  // 喺 overlay 真係「點」一張卡先自動收返(掃就唔收)
   document.addEventListener("pointerup", e => {
     if (!document.body.classList.contains("ipad-immersive-preview")) return;
     if (!(e.target.closest && e.target.closest("[data-study-preview-note]"))) return;
+
+    const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
+    const dt = Date.now() - downT;
+    if (moved > 10 || dt > 600) return; // 郁咗 >10px 或 撳住 >600ms = 當 scroll,唔收
+
     setTimeout(() => {
       document.body.classList.remove("ipad-immersive-preview");
       document.getElementById("ipadPreviewToggle")?.classList.remove("is-on");
