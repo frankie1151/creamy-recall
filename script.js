@@ -9091,3 +9091,53 @@ if ("serviceWorker" in navigator) {
   if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
   else document.addEventListener("DOMContentLoaded", boot);
 })();
+/* ===== iPad M5:強制左右對照 + preview 掣 pointerup ===== */
+(function(){
+  if(window.__creamyIPadM5) return;
+  window.__creamyIPadM5 = true;
+  const isIPad=()=>matchMedia("(min-width:768px) and (max-width:1366px) and (pointer:coarse)").matches;
+
+  /* (3) iPad 一進學習模式就強制左右對照 */
+  function forceSplit(){
+    if(!isIPad()) return;
+    if(typeof studyState==="undefined" || !studyState || !studyState.active) return;
+    if(studyState.preferences.viewMode!=="split"){
+      studyState.preferences.viewMode="split";
+      studyState.answerVisible=false;
+      if(typeof renderStudyMode==="function") renderStudyMode();
+    }
+  }
+
+  /* (4) preview 圓掣改用 pointerup,解決 iOS 要撳幾下 */
+  document.addEventListener("pointerup", e=>{
+    const btn = e.target.closest("#ipadPreviewToggle");
+    if(!btn) return;
+    e.preventDefault();
+    window.__ipadPrevSuppress = true;
+    const hidden = document.body.classList.toggle("ipad-rail-hidden");
+    btn.classList.toggle("is-on", !hidden);
+    setTimeout(()=>{ window.__ipadPrevSuppress=false; }, 500);
+  }, true);
+
+  /* 吞走緊接嘅 click,避免 M3 原本 listener 再 toggle 一次(變冇反應) */
+  document.addEventListener("click", e=>{
+    if(window.__ipadPrevSuppress && e.target.closest("#ipadPreviewToggle")){
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }, true);
+
+  function boot(){
+    forceSplit();
+    const view=document.getElementById("studyModeView");
+    if(view){
+      new MutationObserver(()=>{
+        if(view.classList.contains("hidden")) return;
+        setTimeout(forceSplit, 60);
+      }).observe(view,{attributes:true,attributeFilter:["class"]});
+    }
+    window.addEventListener("resize", forceSplit);
+  }
+  if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
+  else document.addEventListener("DOMContentLoaded", boot);
+})();
