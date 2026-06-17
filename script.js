@@ -8966,3 +8966,52 @@ if ("serviceWorker" in navigator) {
   if (typeof creamyFinalWhenReady === "function") creamyFinalWhenReady(boot);
   else document.addEventListener("DOMContentLoaded", boot);
 })();
+/* ===== iPad M3:離開箭咀 + preview 開關 ===== */
+(function(){
+  if(window.__creamyIPadM3) return;
+  window.__creamyIPadM3 = true;
+  const isIPad=()=>matchMedia("(min-width:768px) and (max-width:1366px) and (pointer:coarse)").matches;
+
+  function ensureButtons(){
+    if(!isIPad()) return;
+    const view=document.getElementById("studyModeView");
+    if(!view || view.classList.contains("hidden")) return;
+    if(document.getElementById("ipadTopLeft")) return;
+
+    const bar=document.createElement("div");
+    bar.id="ipadTopLeft";
+
+    const exit=document.createElement("button");
+    exit.type="button"; exit.className="ipad-icon-btn"; exit.title="離開";
+    exit.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>';
+    exit.addEventListener("click",()=>{ if(typeof closeStudyMode==="function") closeStudyMode(); });
+
+    const prev=document.createElement("button");
+    prev.id="ipadPreviewToggle"; prev.type="button";
+    prev.className="ipad-icon-btn is-on"; prev.title="顯示/收起清單";
+    prev.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>';
+    prev.addEventListener("click",()=>{
+      const hidden=document.body.classList.toggle("ipad-rail-hidden");
+      prev.classList.toggle("is-on", !hidden);
+    });
+
+    bar.appendChild(exit); bar.appendChild(prev);
+    document.body.appendChild(bar);
+  }
+  function cleanup(){
+    document.getElementById("ipadTopLeft")?.remove();
+    document.body.classList.remove("ipad-rail-hidden");
+  }
+  function sync(){
+    const v=document.getElementById("studyModeView");
+    (v && !v.classList.contains("hidden") && isIPad()) ? ensureButtons() : cleanup();
+  }
+  function boot(){
+    sync();
+    const v=document.getElementById("studyModeView");
+    if(v) new MutationObserver(sync).observe(v,{attributes:true,attributeFilter:["class"]});
+    window.addEventListener("resize", sync);
+  }
+  if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
+  else document.addEventListener("DOMContentLoaded", boot);
+})();
