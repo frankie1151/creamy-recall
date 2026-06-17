@@ -3981,3 +3981,47 @@ button, a, select, input, label,
   [data-study-preview-note],
   #subjectDeckGrid .deck-wrap { -webkit-touch-callout: none; }
 }
+/* ===== iPad M3:離開箭咀 + preview 開關 + 拖拉更順手 ===== */
+@media (min-width:768px) and (max-width:1366px) and (pointer:coarse){
+
+  /* 左上角工具列:離開 + preview 開關 */
+  #ipadTopLeft{
+    position:fixed;
+    top:calc(8px + env(safe-area-inset-top));
+    left:calc(10px + env(safe-area-inset-left));
+    z-index:240; display:flex; gap:8px;
+  }
+  .ipad-icon-btn{
+    width:40px; height:40px; padding:0;
+    display:inline-flex; align-items:center; justify-content:center;
+    border-radius:50%; border:1px solid var(--line);
+    background:color-mix(in srgb, var(--card-strong) 94%, transparent);
+    box-shadow:var(--shadow-soft); backdrop-filter:blur(10px);
+    color:var(--text);
+  }
+  .ipad-icon-btn:active{ opacity:.8; }
+  .ipad-icon-btn svg{ width:21px; height:21px; }
+  #ipadPreviewToggle.is-on{
+    background:color-mix(in srgb, var(--primary) 26%, var(--card-strong));
+    border-color:var(--primary);
+  }
+
+  /* 收起 M2 嗰個方形離開掣 */
+  #ipadQuickExit{ display:none !important; }
+
+  /* preview 收起時:淨返 zone2 + zone3 */
+  body.ipad-rail-hidden .study-shell.study-with-rail{
+    grid-template-columns: minmax(0,1fr) !important;
+  }
+  body.ipad-rail-hidden #studyPreviewRail,
+  body.ipad-rail-hidden #studyRailResizer{ display:none !important; }
+  body.ipad-rail-hidden #studyStage,
+  body.ipad-rail-hidden #studyCompleteState{ grid-column:1 !important; }
+
+  /* 拖拉條手感:隱形擴大觸控區,更易抓 */
+  #studyRailResizer::after{
+    content:""; position:absolute; inset:-12px -14px;
+  }
+  #studyRailResizer::before{ width:6px; }
+  #studyRailResizer.dragging::before{ width:8px; }
+}
