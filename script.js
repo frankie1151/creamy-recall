@@ -8780,3 +8780,189 @@ if ("serviceWorker" in navigator) {
     target = null;
   });
 })();
+/* =========================================================
+   iPad 樣板 M2 JS:拖拉 preview 寬度 + 收起頂欄 + 長按右鍵
+   只用 localStorage,唔寫 app_state
+   ========================================================= */
+(function () {
+  if (window.__creamyIPadM2) return;
+  window.__creamyIPadM2 = true;
+
+  const RAIL_KEY = "creamy.ipad.railWidth";
+  const isIPad = () =>
+    window.matchMedia("(min-width:768px) and (max-width:1366px) and (pointer:coarse)").matches;
+
+  /* ---- 套用儲存寬度 ---- */
+  function applyRailWidth() {
+    const shell = document.querySelector(".study-shell.study-with-rail");
+    if (!shell) return;
+    const saved = parseInt(localStorage.getItem(RAIL_KEY) || "", 10);
+    if (saved) shell.style.setProperty("--ipad-rail-width", saved + "px");
+  }
+
+  /* ---- 注入拖拉條 ---- */
+  function injectResizer() {
+    if (!isIPad()) return;
+    const shell = document.querySelector(".study-shell.study-with-rail");
+    const rail = document.getElementById("studyPreviewRail");
+    if (!shell || !rail || rail.classList.contains("hidden")) return;
+    if (document.getElementById("studyRailResizer")) { applyRailWidth(); return; }
+
+    const handle = document.createElement("div");
+    handle.id = "studyRailResizer";
+    handle.title = "拖拉調整清單寬度";
+    rail.insertAdjacentElement("afterend", handle);
+
+    let active = false;
+    handle.addEventListener("pointerdown", e => {
+      active = true;
+      handle.classList.add("dragging");
+      try { handle.setPointerCapture(e.pointerId); } catch {}
+      e.preventDefault();
+    });
+    handle.addEventListener("pointermove", e => {
+      if (!active) return;
+      const rect = shell.getBoundingClientRect();
+      const w = Math.max(200, Math.min(540, e.clientX - rect.left));
+      shell.style.setProperty("--ipad-rail-width", w + "px");
+    });
+    const end = () => {
+      if (!active) return;
+      active = false;
+      handle.classList.remove("dragging");
+      const w = parseInt(shell.style.getPropertyValue("--ipad-rail-width"), 10);
+      if (w) localStorage.setItem(RAIL_KEY, String(w));
+    };
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+
+    applyRailWidth();
+  }
+
+  /* ---- 收起圈住區 toggle ---- */
+  function injectChromeToggle() {
+    if (!isIPad()) return;
+    const view = document.getElementById("studyModeView");
+    if (!view || view.classList.contains("hidden")) return;
+
+    if (!document.getElementById("ipadChromeToggle")) {
+      const btn = document.createElement("button");
+      btn.id = "ipadChromeToggle";
+      btn.type = "button";
+      btn.innerHTML = "⋯ 收起";
+      btn.addEventListener("click", () => {
+        const hidden = document.body.classList.toggle("ipad-chrome-hidden");
+        btn.innerHTML = hidden ? "▾ 顯示" : "⋯ 收起";
+      });
+      document.body.appendChild(btn);
+    }
+    if (!document.getElementById("ipadQuickExit")) {
+      const ex = document.createElement("button");
+      ex.id = "ipadQuickExit";
+      ex.type = "button";
+      ex.textContent = "← 離開";
+      ex.addEventListener("click", () => {
+        if (typeof closeStudyMode === "function") closeStudyMode();
+      });
+      document.body.appendChild(ex);
+    }
+    /* 進入學習模式預設收起一次 */
+    if (!window.__ipadChromeInit) {
+      window.__ipadChromeInit = true;
+      document.body.classList.add("ipad-chrome-hidden");
+      const b = document.getElementById("ipadChromeToggle");
+      if (b) b.innerHTML = "▾ 顯示";
+    }
+  }
+
+  function cleanupChrome() {
+    document.body.classList.remove("ipad-chrome-hidden");
+    document.getElementById("ipadChromeToggle")?.remove();
+    document.getElementById("ipadQuickExit")?.remove();
+    window.__ipadChromeInit = false;
+  }
+
+  function syncStudyChrome() {
+    const view = document.getElementById("studyModeView");
+    const open = view && !view.classList.contains("hidden");
+    if (open && isIPad()) {
+      injectResizer();
+      injectChromeToggle();
+    } else {
+      cleanupChrome();
+    }
+  }
+
+  /* ---- 長按 = 右鍵(觸發現有 contextmenu 選單)---- */
+  const LP_SELECTOR = [
+    "[data-context-note]",
+    "[data-context-deck]",
+    "[data-study-preview-note]",
+    "[data-g1-missed-row]",
+    "[data-missed-point-id]"
+  ].join(",");
+
+  let lpTimer = null, lpX = 0, lpY = 0, lpEl = null;
+  const clearLp = () => { clearTimeout(lpTimer); lpTimer = null; };
+
+  document.addEventListener("touchstart", e => {
+    if (!isIPad() || e.touches.length !== 1) return;
+    const el = e.target.closest(LP_SELECTOR);
+    if (!el) return;
+    const t = e.touches[0];
+    lpX = t.clientX; lpY = t.clientY; lpEl = el;
+    clearLp();
+    lpTimer = setTimeout(() => {
+      window.__lpSuppressClick = true;
+      try { navigator.vibrate && navigator.vibrate(12); } catch {}
+      lpEl.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true, cancelable: true, view: window, clientX: lpX, clientY: lpY
+      }));
+    }, 480);
+  }, { passive: true });
+
+  document.addEventListener("touchmove", e => {
+    if (!lpTimer) return;
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - lpX) > 12 || Math.abs(t.clientY - lpY) > 12) clearLp();
+  }, { passive: true });
+
+  document.addEventListener("touchend", () => {
+    clearLp();
+    if (window.__lpSuppressClick) setTimeout(() => { window.__lpSuppressClick = false; }, 500);
+  }, { passive: true });
+
+  document.addEventListener("touchcancel", clearLp, { passive: true });
+
+  /* 長按後吞掉緊接 click,避免又開卡/又跳卡 */
+  document.addEventListener("click", e => {
+    if (window.__lpSuppressClick) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      window.__lpSuppressClick = false;
+    }
+  }, true);
+
+  /* ---- 啟動 ---- */
+  function boot() {
+    syncStudyChrome();
+
+    const view = document.getElementById("studyModeView");
+    if (view) {
+      new MutationObserver(syncStudyChrome)
+        .observe(view, { attributes: true, attributeFilter: ["class"] });
+    }
+    const shell = document.querySelector(".study-shell");
+    if (shell) {
+      new MutationObserver(() => { if (isIPad()) injectResizer(); })
+        .observe(shell, { childList: true, subtree: true });
+    }
+    window.addEventListener("resize", () => {
+      if (!isIPad()) cleanupChrome();
+      else syncStudyChrome();
+    });
+  }
+
+  if (typeof creamyFinalWhenReady === "function") creamyFinalWhenReady(boot);
+  else document.addEventListener("DOMContentLoaded", boot);
+})();
