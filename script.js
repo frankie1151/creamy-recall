@@ -9141,3 +9141,83 @@ if ("serviceWorker" in navigator) {
   if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
   else document.addEventListener("DOMContentLoaded", boot);
 })();
+/* ===== iPad M6:浮動「編輯」掣 + 中間 Q/A 拖拉條 ===== */
+(function(){
+  if(window.__creamyIPadM6) return;
+  window.__creamyIPadM6 = true;
+  const isIPad=()=>matchMedia("(min-width:768px) and (max-width:1366px) and (pointer:coarse)").matches;
+  const SPLIT_KEY="creamy.ipad.splitQ";
+
+  /* 因為收起咗原生頂欄,要將「原地編輯」加返入浮動掣列 */
+  function ensureEditBtn(){
+    if(!isIPad()) return;
+    const bar=document.getElementById("ipadTopLeft");
+    if(!bar || document.getElementById("ipadEditBtn")) return;
+    const edit=document.createElement("button");
+    edit.id="ipadEditBtn"; edit.type="button";
+    edit.className="ipad-icon-btn"; edit.title="原地編輯";
+    edit.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+    edit.addEventListener("pointerup", e=>{
+      e.preventDefault();
+      document.getElementById("studyEditBtn")?.click();
+    }, true);
+    bar.appendChild(edit);
+  }
+
+  /* 中間拖拉條:調 Q/A 比例 */
+  function applyRatio(){
+    const split=document.getElementById("studyCardSplit");
+    if(!split) return;
+    const saved=parseInt(localStorage.getItem(SPLIT_KEY)||"",10);
+    if(saved) split.style.setProperty("--ipad-split-q", saved+"px");
+  }
+  function bindResizer(){
+    if(!isIPad()) return;
+    const split=document.getElementById("studyCardSplit");
+    const handle=document.getElementById("studySplitResizer");
+    if(!split||!handle) return;
+    applyRatio();
+    if(handle.dataset.m6Bound) return;
+    handle.dataset.m6Bound="1";
+
+    let active=false;
+    handle.addEventListener("pointerdown", e=>{
+      active=true; handle.classList.add("dragging");
+      try{ handle.setPointerCapture(e.pointerId); }catch{}
+      e.preventDefault(); e.stopPropagation();
+    }, true);
+    handle.addEventListener("pointermove", e=>{
+      if(!active) return;
+      const r=split.getBoundingClientRect();
+      const w=Math.max(220, Math.min(r.width-220, e.clientX-r.left));
+      split.style.setProperty("--ipad-split-q", w+"px");
+    }, true);
+    const end=()=>{
+      if(!active) return;
+      active=false; handle.classList.remove("dragging");
+      const w=parseInt(split.style.getPropertyValue("--ipad-split-q"),10);
+      if(w) localStorage.setItem(SPLIT_KEY, String(w));
+    };
+    handle.addEventListener("pointerup", end, true);
+    handle.addEventListener("pointercancel", end, true);
+  }
+
+  function sync(){
+    if(!isIPad()) return;
+    const v=document.getElementById("studyModeView");
+    if(!v || v.classList.contains("hidden")) return;
+    ensureEditBtn();
+    bindResizer();
+  }
+
+  function boot(){
+    sync();
+    const v=document.getElementById("studyModeView");
+    if(v) new MutationObserver(sync).observe(v,{attributes:true,attributeFilter:["class"]});
+    const stage=document.getElementById("studyStage");
+    if(stage) new MutationObserver(sync).observe(stage,{childList:true,subtree:true});
+    window.addEventListener("resize", sync);
+  }
+  if(typeof creamyFinalWhenReady==="function") creamyFinalWhenReady(boot);
+  else document.addEventListener("DOMContentLoaded", boot);
+})();
