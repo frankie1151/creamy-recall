@@ -9091,3 +9091,116 @@ if ("serviceWorker" in navigator) {
 
   document.addEventListener("pointercancel", ()=>{ active=false; }, true);
 })();
+/* =========================================================
+   ADD-ON:按 Deck 音效 + iPad 沉浸模式仍可開 preview
+   ========================================================= */
+
+/* ---- (1) 按 Deck 加音效:每個 Deck 有自己嘅簽名音 ---- */
+(function () {
+  if (window.__creamyDeckSound) return;
+  window.__creamyDeckSound = true;
+
+  // 由 deck id 生成穩定頻率,每個 deck 固定唔同音
+  function deckFreqs(deckId) {
+    let h = 0;
+    const s = String(deckId || "deck");
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    const scale = [392.0, 440.0, 493.88, 523.25, 587.33, 659.25, 783.99]; // 五聲音階,聽落舒服
+    return [scale[h % scale.length], scale[(h >> 3) % scale.length]];
+  }
+
+  function playDeckSound(deckId) {
+    if (!appState?.settings?.soundEnabled) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      const vol = clamp(appState.settings.soundVolume ?? 70, 0, 100) / 100;
+      const master = ctx.createGain();
+      master.gain.value = 0.22 * vol;
+      master.connect(ctx.destination);
+      const now = ctx.currentTime;
+      const [f1, f2] = deckFreqs(deckId);
+      const tone = (freq, start, dur) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, now + start);
+        g.gain.exponentialRampToValueAtTime(0.72, now + start + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+        osc.connect(g); g.connect(master);
+        osc.start(now + start); osc.stop(now + start + dur + 0.03);
+      };
+      tone(f1, 0, 0.14);
+      tone(f2, 0.09, 0.18);
+      setTimeout(() => ctx.close?.(), 900);
+    } catch {}
+  }
+  window.playDeckSound = playDeckSound;
+
+  // 進入 deck 卡片牆時響
+  if (typeof openDeckWall === "function") {
+    const base = openDeckWall;
+    window.openDeckWall = openDeckWall = function (deckId) {
+      playDeckSound(deckId);
+      return base.apply(this, arguments);
+    };
+  }
+
+  // 由 deck 開始複習時響
+  if (typeof openStudyPreference === "function") {
+    const baseP = openStudyPreference;
+    window.openStudyPreference = openStudyPreference = function (source) {
+      if (source && source.type === "deck") playDeckSound(source.deckId);
+      return baseP.apply(this, arguments);
+    };
+  }
+})();
+
+
+/* ---- (2) iPad 沉浸模式仍可開 preview(浮動 overlay) ---- */
+(function () {
+  if (window.__creamyIPadM9) return;
+  window.__creamyIPadM9 = true;
+  const isIPad = () =>
+    matchMedia("(min-width:768px) and (max-width:1366px) and (pointer:coarse)").matches;
+
+  /*
+    用 window 嘅 capture handler:會喺 M5 嘅 document handler 之前行,
+    咁就可以喺沉浸模式攔截,唔俾 M5 嘅 ipad-rail-hidden 邏輯搞亂。
+  */
+  window.addEventListener("pointerup", e => {
+    const btn = e.target.closest && e.target.closest("#ipadPreviewToggle");
+    if (!btn || !isIPad()) return;
+    if (!document.body.classList.contains("ipad-immersive")) return; // 非沉浸:交返 M5 處理
+
+    e.preventDefault();
+    e.stopImmediatePropagation(); // 阻止 M5
+    window.__ipadPrevSuppress = true;
+    const open = document.body.classList.toggle("ipad-immersive-preview");
+    btn.classList.toggle("is-on", open);
+    setTimeout(() => { window.__ipadPrevSuppress = false; }, 500);
+  }, true);
+
+  // 喺沉浸 overlay 揀完一張卡,自動收返 overlay
+  document.addEventListener("pointerup", e => {
+    if (!document.body.classList.contains("ipad-immersive-preview")) return;
+    if (!(e.target.closest && e.target.closest("[data-study-preview-note]"))) return;
+    setTimeout(() => {
+      document.body.classList.remove("ipad-immersive-preview");
+      document.getElementById("ipadPreviewToggle")?.classList.remove("is-on");
+    }, 60);
+  }, false);
+
+  // 退出沉浸時順手收起 overlay
+  document.addEventListener("pointerup", e => {
+    if (e.target.closest && e.target.closest("#ipadImmersiveToggle")) {
+      setTimeout(() => {
+        if (!document.body.classList.contains("ipad-immersive")) {
+          document.body.classList.remove("ipad-immersive-preview");
+        }
+      }, 0);
+    }
+  }, true);
+})();
