@@ -8269,3 +8269,239 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch(console.error);
   });
 }
+/* =========================================================
+   CREAMY SUPABASE SYNC（貼喺 script.js 最底）
+   ========================================================= */
+(function () {
+  if (window.__creamySupabaseSync) return;
+  window.__creamySupabaseSync = true;
+
+  const SB_URL = "https://nzbqnvfqerdtbxonzqus.supabase.co";
+  const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56YnFudmZxZXJkdGJ4b256cXVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NTI1MzAsImV4cCI6MjA5NzIyODUzMH0.Yr2ukwuLyJtz3Tx13wT0_aU_jy57xYHFoFyZCJprEsE";
+  const BUCKET = "card-images";
+
+  const H = () => ({ apikey: SB_KEY, Authorization: "Bearer " + SB_KEY });
+  const enc = encodeURIComponent;
+
+  let pushTimer = null;
+  let pushing = false;
+  let pullDone = false;
+
+  function setCloudStatus(text) {
+    const hint = document.getElementById("saveHint");
+    if (hint) hint.textContent = text;
+  }
+
+  /* ---------- 圖片壓縮 ---------- */
+  async function compressToWebp(blob) {
+    try {
+      const bmp = await createImageBitmap(blob);
+      const max = 1280;
+      let w = bmp.width, h = bmp.height;
+      if (Math.max(w, h) > max) {
+        const s = max / Math.max(w, h);
+        w = Math.round(w * s); h = Math.round(h * s);
+      }
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(bmp, 0, 0, w, h);
+      return (await new Promise(r => c.toBlob(r, "image/webp", 0.82))) || blob;
+    } catch { return blob; }
+  }
+
+  /* ---------- 圖片下載 / 上傳 ---------- */
+  async function downloadImage(fileId) {
+    const urls = [
+      `${SB_URL}/storage/v1/object/public/${BUCKET}/${enc(fileId)}.webp`,
+      `${SB_URL}/storage/v1/object/${BUCKET}/${enc(fileId)}.webp`
+    ];
+    for (const u of urls) {
+      try {
+        const res = await fetch(u, { headers: H() });
+        if (res.ok) { const b = await res.blob(); if (b && b.size) return b; }
+      } catch {}
+    }
+    return null;
+  }
+
+  async function uploadImage(fileId) {
+    try {
+      const rec = await fileGet(fileId);
+      if (!rec?.blob) return;
+      let out = rec.blob;
+      if ((rec.type || "").startsWith("image/")) out = await compressToWebp(rec.blob);
+      await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${enc(fileId)}.webp`, {
+        method: "POST",
+        headers: { ...H(), "x-upsert": "true", "Content-Type": "image/webp" },
+        body: out
+      });
+    } catch {}
+  }
+
+  /* ---------- 覆寫 buildObjectUrl：本機冇就去雲端攞 ---------- */
+  const _baseBuild = buildObjectUrl;
+  buildObjectUrl = async function (fileId) {
+    if (!fileId) return "";
+    if (objectUrlCache.has(fileId)) return objectUrlCache.get(fileId);
+
+    let rec = await fileGet(fileId);
+    if (!rec?.blob) {
+      const blob = await downloadImage(fileId);
+      if (blob) {
+        try {
+          await filePut({ id: fileId, name: fileId + ".webp", type: blob.type || "image/webp", blob, createdAt: Date.now() });
+        } catch {}
+        rec = { blob };
+      }
+    }
+    if (!rec?.blob) return "";
+    const url = URL.createObjectURL(rec.blob);
+    objectUrlCache.set(fileId, url);
+    return url;
+  };
+
+  /* ---------- 覆寫 saveBlobToDb：新圖自動上傳 ---------- */
+  const _baseSaveBlob = saveBlobToDb;
+  saveBlobToDb = async function (file, customId) {
+    const meta = await _baseSaveBlob(file, customId);
+    uploadImage(meta.id).catch(() => {});
+    return meta;
+  };
+
+  /* ---------- 已推送 id 記錄（用嚟正確處理刪除） ---------- */
+  async function getPushedIds() {
+    try { return (await kvGet(stateDb, STATE_STORE, "cloud-pushed-ids")) || { notes: [], decks: [] }; }
+    catch { return { notes: [], decks: [] }; }
+  }
+  async function setPushedIds(obj) {
+    try { await kvSet(stateDb, STATE_STORE, "cloud-pushed-ids", obj); } catch {}
+  }
+
+  async function upsert(table, rows) {
+    for (let i = 0; i < rows.length; i += 80) {
+      const res = await fetch(`${SB_URL}/rest/v1/${table}`, {
+        method: "POST",
+        headers: { ...H(), "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(rows.slice(i, i + 80))
+      });
+      if (!res.ok) throw new Error(`${table} upsert ${res.status}`);
+    }
+  }
+  async function deleteRows(table, ids) {
+    for (const id of ids) {
+      try { await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${enc(id)}`, { method: "DELETE", headers: H() }); } catch {}
+    }
+  }
+
+  /* ---------- 推送本機 → 雲端 ---------- */
+  async function pushState() {
+    if (pushing || !appState || !pullDone) return;
+    pushing = true;
+    setCloudStatus("☁️ 同步中…");
+    try {
+      const pushed = await getPushedIds();
+      const curNoteIds = appState.notes.map(n => n.id);
+      const curDeckIds = appState.decks.map(d => d.id);
+
+      let delNotes = (pushed.notes || []).filter(id => !curNoteIds.includes(id));
+      const delDecks = (pushed.decks || []).filter(id => !curDeckIds.includes(id) && id !== "uncategorized");
+
+      // 安全網：本機突然變空（reset / 被瀏覽器清掉）時，唔好把雲端整批刪走
+      if (curNoteIds.length === 0 && delNotes.length > 5) delNotes = [];
+
+      await upsert("decks", appState.decks.map(d => ({ id: d.id, data: d })));
+      await upsert("notes", appState.notes.map(n => ({ id: n.id, deck_id: n.deckId, data: n })));
+      await upsert("app_state", [{ id: "main", data: { version: appState.version, progress: appState.progress, settings: appState.settings } }]);
+
+      if (delNotes.length) await deleteRows("notes", delNotes);
+      if (delDecks.length) await deleteRows("decks", delDecks);
+
+      await setPushedIds({ notes: curNoteIds, decks: curDeckIds });
+
+      const t = new Date();
+      setCloudStatus(`☁️ 已同步 ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`);
+    } catch (e) {
+      console.error("cloud push fail", e);
+      setCloudStatus("⚠️ 雲端同步失敗");
+    } finally {
+      pushing = false;
+    }
+  }
+
+  function schedulePush() {
+    if (!pullDone) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushState, 1800);
+  }
+
+  /* ---------- 覆寫 saveStateNow：每次存檔後排程推送 ---------- */
+  const _baseSaveState = saveStateNow;
+  saveStateNow = async function (cs = appState, msg = "已儲存") {
+    const r = await _baseSaveState(cs, msg);
+    schedulePush();
+    return r;
+  };
+
+  /* ---------- 開機：由雲端落資料並合併 ---------- */
+  async function pullState() {
+    setCloudStatus("☁️ 載入雲端資料…");
+    try {
+      const [dRes, nRes, sRes] = await Promise.all([
+        fetch(`${SB_URL}/rest/v1/decks?select=data`, { headers: H() }),
+        fetch(`${SB_URL}/rest/v1/notes?select=data`, { headers: H() }),
+        fetch(`${SB_URL}/rest/v1/app_state?id=eq.main&select=data`, { headers: H() })
+      ]);
+
+      const remoteDecks = dRes.ok ? (await dRes.json()).map(r => r.data).filter(Boolean) : [];
+      const remoteNotes = nRes.ok ? (await nRes.json()).map(r => r.data).filter(Boolean) : [];
+      const remoteState = sRes.ok ? ((await sRes.json())[0]?.data || null) : null;
+
+      // decks：合併，雲端版本覆蓋同名 id
+      const deckMap = new Map(appState.decks.map(d => [d.id, d]));
+      remoteDecks.forEach(d => { if (d && d.id) deckMap.set(d.id, d); });
+      appState.decks = [...deckMap.values()];
+      if (!appState.decks.some(d => d.id === "uncategorized")) {
+        appState.decks.unshift({ id: "uncategorized", name: "Uncategorized", color: "#eeeeee", protected: true, createdAt: Date.now() });
+      }
+
+      // notes：按 updatedAt 比較，雲端日期較新先覆蓋（同日保留本機，保護當日編輯）
+      const noteMap = new Map(appState.notes.map(n => [n.id, n]));
+      remoteNotes.forEach(rn => {
+        if (!rn || !rn.id) return;
+        const local = noteMap.get(rn.id);
+        if (!local) { noteMap.set(rn.id, rn); return; }
+        if ((rn.updatedAt || "") > (local.updatedAt || "")) noteMap.set(rn.id, rn);
+      });
+      const nameMap = new Map(appState.decks.map(d => [d.name, d.id]));
+      appState.notes = [...noteMap.values()].map(n => normalizeNote(n, appState.decks, nameMap));
+
+      // 進度／設定：以雲端為主合併
+      if (remoteState) {
+        if (remoteState.progress) appState.progress = { ...appState.progress, ...remoteState.progress };
+        if (remoteState.settings) appState.settings = { ...appState.settings, ...remoteState.settings };
+      }
+
+      await _baseSaveState(appState, "已同步雲端");
+      await setPushedIds({ notes: appState.notes.map(n => n.id), decks: appState.decks.map(d => d.id) });
+
+      applyTheme(appState.settings.theme || "cream");
+      await renderAll();
+
+      const t = new Date();
+      setCloudStatus(`☁️ 已同步 ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`);
+    } catch (e) {
+      console.error("cloud pull fail", e);
+      setCloudStatus("⚠️ 雲端載入失敗（用本機資料）");
+    } finally {
+      pullDone = true;
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    creamyFinalWhenReady(() => setTimeout(pullState, 400));
+  });
+
+  // debug 用：可喺 Console 手動 window.creamyCloudPull() / window.creamyCloudPush()
+  window.creamyCloudPull = pullState;
+  window.creamyCloudPush = pushState;
+})();
