@@ -3839,3 +3839,42 @@ body[data-theme="night"] .context-menu {
     opacity: 0.82;
   }
 }
+/* =========================================================
+   iOS 單擊修正：停用雙擊縮放延遲（食 tap 主因）
+   ========================================================= */
+html {
+  touch-action: manipulation;
+}
+
+button, a, select, input, label,
+.nav-btn, .hero-btn, .primary-btn, .ghost-btn, .mini-btn,
+.tool-btn, .tiny-btn, .icon-btn, .deck-study-btn,
+.subject-deck, .deck-wrap,
+.wall-card, .study-preview-card,
+.study-card-flip, .study-card-inner, .flip-card, .flip-card-inner,
+.star-btn, .seg-btn, .theme-option, .calendar-day,
+.color-dot, .text-color-dot,
+[onclick],
+[data-click-study-note],
+[data-study-preview-note] {
+  touch-action: manipulation !important;
+}
+/* 翻卡 + 預覽卡：tap 時唔好觸發選字（編輯模式除外） */
+.study-card-flip,
+.study-card-inner,
+.study-face,
+.study-preview-card {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 原地編輯時仍可正常選字 */
+.study-editing,
+.study-question-editing,
+.study-answer-editing,
+.rich-editor,
+[contenteditable="true"] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
