@@ -8270,7 +8270,7 @@ if ("serviceWorker" in navigator) {
   });
 }
 /* =========================================================
-   CREAMY SUPABASE SYNC（貼喺 script.js 最底）
+   CREAMY SUPABASE SYNC v2（true last-write-wins，毫秒級）
    ========================================================= */
 (function () {
   if (window.__creamySupabaseSync) return;
@@ -8286,10 +8286,26 @@ if ("serviceWorker" in navigator) {
   let pushTimer = null;
   let pushing = false;
   let pullDone = false;
+  let localStateMts = 0; // 本機進度最後改動時間（毫秒）
 
   function setCloudStatus(text) {
     const hint = document.getElementById("saveHint");
     if (hint) hint.textContent = text;
+  }
+
+  /* ---------- 時間戳工具 ---------- */
+  function dateToMts(s) {
+    const t = Date.parse((s || "") + "T12:00:00");
+    return Number.isFinite(t) ? t : 0;
+  }
+  function getMts(n) {
+    return Number(n && n._mts) || dateToMts(n && n.updatedAt) || 0;
+  }
+  function fingerprint(n) {
+    const c = { ...n };
+    delete c._flipped;
+    delete c._mts;
+    return JSON.stringify(c);
   }
 
   /* ---------- 圖片壓縮 ---------- */
@@ -8323,7 +8339,6 @@ if ("serviceWorker" in navigator) {
     }
     return null;
   }
-
   async function uploadImage(fileId) {
     try {
       const rec = await fileGet(fileId);
@@ -8343,14 +8358,11 @@ if ("serviceWorker" in navigator) {
   buildObjectUrl = async function (fileId) {
     if (!fileId) return "";
     if (objectUrlCache.has(fileId)) return objectUrlCache.get(fileId);
-
     let rec = await fileGet(fileId);
     if (!rec?.blob) {
       const blob = await downloadImage(fileId);
       if (blob) {
-        try {
-          await filePut({ id: fileId, name: fileId + ".webp", type: blob.type || "image/webp", blob, createdAt: Date.now() });
-        } catch {}
+        try { await filePut({ id: fileId, name: fileId + ".webp", type: blob.type || "image/webp", blob, createdAt: Date.now() }); } catch {}
         rec = { blob };
       }
     }
@@ -8368,13 +8380,13 @@ if ("serviceWorker" in navigator) {
     return meta;
   };
 
-  /* ---------- 已推送 id 記錄（用嚟正確處理刪除） ---------- */
-  async function getPushedIds() {
-    try { return (await kvGet(stateDb, STATE_STORE, "cloud-pushed-ids")) || { notes: [], decks: [] }; }
-    catch { return { notes: [], decks: [] }; }
+  /* ---------- 已推送記錄 + 卡片指紋快照 ---------- */
+  async function getMeta() {
+    try { return (await kvGet(stateDb, STATE_STORE, "cloud-meta")) || { notes: [], decks: [], stateMts: 0, snap: {} }; }
+    catch { return { notes: [], decks: [], stateMts: 0, snap: {} }; }
   }
-  async function setPushedIds(obj) {
-    try { await kvSet(stateDb, STATE_STORE, "cloud-pushed-ids", obj); } catch {}
+  async function setMeta(obj) {
+    try { await kvSet(stateDb, STATE_STORE, "cloud-meta", obj); } catch {}
   }
 
   async function upsert(table, rows) {
@@ -8399,24 +8411,41 @@ if ("serviceWorker" in navigator) {
     pushing = true;
     setCloudStatus("☁️ 同步中…");
     try {
-      const pushed = await getPushedIds();
+      const meta = await getMeta();
+      const snap = meta.snap || {};
+      const newSnap = {};
+
+      // 逐張卡判斷有冇改：改咗就蓋上 Date.now()（≈編輯時間）
+      appState.notes.forEach(n => {
+        const f = fingerprint(n);
+        newSnap[n.id] = f;
+        if (snap[n.id] === undefined) {
+          if (!n._mts) n._mts = getMts(n);        // 首次見到：用 updatedAt 推算，穩定
+        } else if (snap[n.id] !== f) {
+          n._mts = Date.now();                    // 真係改過：蓋新時間戳
+        } else if (!n._mts) {
+          n._mts = getMts(n);
+        }
+      });
+
       const curNoteIds = appState.notes.map(n => n.id);
       const curDeckIds = appState.decks.map(d => d.id);
 
-      let delNotes = (pushed.notes || []).filter(id => !curNoteIds.includes(id));
-      const delDecks = (pushed.decks || []).filter(id => !curDeckIds.includes(id) && id !== "uncategorized");
-
-      // 安全網：本機突然變空（reset / 被瀏覽器清掉）時，唔好把雲端整批刪走
-      if (curNoteIds.length === 0 && delNotes.length > 5) delNotes = [];
+      let delNotes = (meta.notes || []).filter(id => !curNoteIds.includes(id));
+      const delDecks = (meta.decks || []).filter(id => !curDeckIds.includes(id) && id !== "uncategorized");
+      if (curNoteIds.length === 0 && delNotes.length > 5) delNotes = []; // 安全網
 
       await upsert("decks", appState.decks.map(d => ({ id: d.id, data: d })));
       await upsert("notes", appState.notes.map(n => ({ id: n.id, deck_id: n.deckId, data: n })));
-      await upsert("app_state", [{ id: "main", data: { version: appState.version, progress: appState.progress, settings: appState.settings } }]);
+      await upsert("app_state", [{
+        id: "main",
+        data: { version: appState.version, progress: appState.progress, settings: appState.settings, _mts: localStateMts }
+      }]);
 
       if (delNotes.length) await deleteRows("notes", delNotes);
       if (delDecks.length) await deleteRows("decks", delDecks);
 
-      await setPushedIds({ notes: curNoteIds, decks: curDeckIds });
+      await setMeta({ notes: curNoteIds, decks: curDeckIds, stateMts: localStateMts, snap: newSnap });
 
       const t = new Date();
       setCloudStatus(`☁️ 已同步 ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`);
@@ -8430,11 +8459,12 @@ if ("serviceWorker" in navigator) {
 
   function schedulePush() {
     if (!pullDone) return;
+    localStateMts = Date.now();           // 任何存檔都當作「進度有改動」
     clearTimeout(pushTimer);
     pushTimer = setTimeout(pushState, 1800);
   }
 
-  /* ---------- 覆寫 saveStateNow：每次存檔後排程推送 ---------- */
+  /* ---------- 覆寫 saveStateNow ---------- */
   const _baseSaveState = saveStateNow;
   saveStateNow = async function (cs = appState, msg = "已儲存") {
     const r = await _baseSaveState(cs, msg);
@@ -8442,10 +8472,13 @@ if ("serviceWorker" in navigator) {
     return r;
   };
 
-  /* ---------- 開機：由雲端落資料並合併 ---------- */
+  /* ---------- 開機：由雲端落資料並合併（毫秒級 last-write-wins） ---------- */
   async function pullState() {
     setCloudStatus("☁️ 載入雲端資料…");
     try {
+      const meta = await getMeta();
+      localStateMts = Number(meta.stateMts || 0);
+
       const [dRes, nRes, sRes] = await Promise.all([
         fetch(`${SB_URL}/rest/v1/decks?select=data`, { headers: H() }),
         fetch(`${SB_URL}/rest/v1/notes?select=data`, { headers: H() }),
@@ -8456,7 +8489,7 @@ if ("serviceWorker" in navigator) {
       const remoteNotes = nRes.ok ? (await nRes.json()).map(r => r.data).filter(Boolean) : [];
       const remoteState = sRes.ok ? ((await sRes.json())[0]?.data || null) : null;
 
-      // decks：合併，雲端版本覆蓋同名 id
+      // decks 合併
       const deckMap = new Map(appState.decks.map(d => [d.id, d]));
       remoteDecks.forEach(d => { if (d && d.id) deckMap.set(d.id, d); });
       appState.decks = [...deckMap.values()];
@@ -8464,25 +8497,43 @@ if ("serviceWorker" in navigator) {
         appState.decks.unshift({ id: "uncategorized", name: "Uncategorized", color: "#eeeeee", protected: true, createdAt: Date.now() });
       }
 
-      // notes：按 updatedAt 比較，雲端日期較新先覆蓋（同日保留本機，保護當日編輯）
+      // notes：用 _mts 比，遲嗰個贏
       const noteMap = new Map(appState.notes.map(n => [n.id, n]));
       remoteNotes.forEach(rn => {
         if (!rn || !rn.id) return;
         const local = noteMap.get(rn.id);
         if (!local) { noteMap.set(rn.id, rn); return; }
-        if ((rn.updatedAt || "") > (local.updatedAt || "")) noteMap.set(rn.id, rn);
+        if (getMts(rn) > getMts(local)) noteMap.set(rn.id, rn);
       });
-      const nameMap = new Map(appState.decks.map(d => [d.name, d.id]));
-      appState.notes = [...noteMap.values()].map(n => normalizeNote(n, appState.decks, nameMap));
 
-      // 進度／設定：以雲端為主合併
+      const nameMap = new Map(appState.decks.map(d => [d.name, d.id]));
+      appState.notes = [...noteMap.values()].map(n => {
+        const norm = normalizeNote(n, appState.decks, nameMap);
+        norm._mts = getMts(n);     // normalizeNote 會洗走 _mts，要補返
+        return norm;
+      });
+
+      // 進度／設定：雲端較遲先覆蓋
       if (remoteState) {
-        if (remoteState.progress) appState.progress = { ...appState.progress, ...remoteState.progress };
-        if (remoteState.settings) appState.settings = { ...appState.settings, ...remoteState.settings };
+        const rMts = Number(remoteState._mts || 0);
+        if (rMts > localStateMts) {
+          if (remoteState.progress) appState.progress = { ...appState.progress, ...remoteState.progress };
+          if (remoteState.settings) appState.settings = { ...appState.settings, ...remoteState.settings };
+          localStateMts = rMts;
+        }
       }
 
       await _baseSaveState(appState, "已同步雲端");
-      await setPushedIds({ notes: appState.notes.map(n => n.id), decks: appState.decks.map(d => d.id) });
+
+      // 重建快照基準
+      const snap = {};
+      appState.notes.forEach(n => { snap[n.id] = fingerprint(n); });
+      await setMeta({
+        notes: appState.notes.map(n => n.id),
+        decks: appState.decks.map(d => d.id),
+        stateMts: localStateMts,
+        snap
+      });
 
       applyTheme(appState.settings.theme || "cream");
       await renderAll();
@@ -8494,6 +8545,7 @@ if ("serviceWorker" in navigator) {
       setCloudStatus("⚠️ 雲端載入失敗（用本機資料）");
     } finally {
       pullDone = true;
+      schedulePush(); // 把合併結果＋_mts 推返上雲
     }
   }
 
@@ -8501,7 +8553,6 @@ if ("serviceWorker" in navigator) {
     creamyFinalWhenReady(() => setTimeout(pullState, 400));
   });
 
-  // debug 用：可喺 Console 手動 window.creamyCloudPull() / window.creamyCloudPush()
   window.creamyCloudPull = pullState;
   window.creamyCloudPush = pushState;
 })();
