@@ -3881,8 +3881,8 @@ body[data-theme="night"] #ipRateBar button[data-r="remembered"] { background: #4
 
   /* (3)(7) deck 內 / 全部卡片:強制卡片大小一致 */
   body.iphone-mode #notesList .wall-card {
-    height: 168px !important;
-    min-height: 168px !important;
+    height: 210px !important;
+    min-height: 210px !important;
     overflow: hidden !important;
   }
   body.iphone-mode #notesList .wall-card .wall-title {
@@ -3920,5 +3920,47 @@ body[data-theme="night"] #ipRateBar button[data-r="remembered"] { background: #4
     touch-action: pinch-zoom !important;
     max-width: 96vw !important;
     max-height: 90vh !important;
+  }
+}
+/* =========================================================
+   iPhone 修正包 v5:消除學習卡下方空白(flex 撐滿)
+   ========================================================= */
+@media (max-width: 520px) and (pointer: coarse) {
+
+  /* studyStage 改 flex column,張卡 flex:1 撐到底 */
+  body.iphone-mode #studyStage {
+    display: flex !important;
+    flex-direction: column !important;
+    box-sizing: border-box !important;
+    min-height: 100dvh !important;
+    padding-bottom: 86px !important;   /* 只留評分 bar 高度 */
+  }
+
+  body.iphone-mode .study-card-stack {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  body.iphone-mode #studyCardFlip {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+  }
+
+  /* 解除固定高度,改由 flex 決定 */
+  body.iphone-mode .study-card-inner {
+    height: auto !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+  }
+
+  /* 內容區照樣可捲動 */
+  body.iphone-mode .study-face { min-height: 0 !important; }
+  body.iphone-mode .study-content {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: auto !important;
   }
 }
