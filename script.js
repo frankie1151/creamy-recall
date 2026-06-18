@@ -9212,3 +9212,40 @@ if ("serviceWorker" in navigator) {
     }
   }, true);
 })();
+/* ===== Exit button sound (self-contained, no audio file) ===== */
+(function () {
+  let _exitAudioCtx = null;
+
+  function playExitSound() {
+    try {
+      _exitAudioCtx = _exitAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = _exitAudioCtx;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      // 柔和下行兩音,配合 creamy 風格
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, now);        // C5
+      osc.frequency.exponentialRampToValueAtTime(392, now + 0.18); // G4
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.28);
+    } catch (e) { /* 靜默失敗,唔阻離開 */ }
+  }
+
+  // capture 階段:只播音,唔 preventDefault,唔掂原本 exit handler
+  document.addEventListener('click', function (e) {
+    const target = e.target.closest(
+      '#ipadQuickExit, #ipadTopLeft .ipad-icon-btn:first-child, [data-study-exit]'
+    );
+    if (target) playExitSound();
+  }, true);
+})();
