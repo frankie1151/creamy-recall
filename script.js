@@ -9212,3 +9212,73 @@ if ("serviceWorker" in navigator) {
     }
   }, true);
 })();
+/* =========================================================
+   iPhone 直條沉浸版 + 離開掣音效(統一 playSound)
+   ========================================================= */
+(function () {
+  if (window.__creamyIphoneImmersive) return;
+  window.__creamyIphoneImmersive = true;
+
+  const mq = window.matchMedia("(max-width: 480px) and (pointer: coarse)");
+  const isPhone = () => mq.matches;
+
+  function setBodyClass() {
+    document.body.classList.toggle("iphone-mode", isPhone());
+  }
+  setBodyClass();
+  mq.addEventListener ? mq.addEventListener("change", setBodyClass) : mq.addListener(setBodyClass);
+  window.addEventListener("resize", setBodyClass);
+  window.addEventListener("orientationchange", () => setTimeout(setBodyClass, 60));
+
+  /* ---- 浮動頂欄:離開 + 進度 ---- */
+  function ensureFloatingBar() {
+    let bar = document.getElementById("iphoneStudyBar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "iphoneStudyBar";
+      bar.innerHTML = `
+        <button type="button" id="iphoneStudyExit" aria-label="離開">‹ 離開</button>
+        <span id="iphoneStudyProgress"></span>
+      `;
+      document.body.appendChild(bar);
+      bar.querySelector("#iphoneStudyExit").addEventListener("click", e => {
+        e.preventDefault();
+        closeStudyMode();           // 音效喺 closeStudyMode wrap 處理,唔重複
+      });
+    }
+    return bar;
+  }
+
+  function syncFloatingBar() {
+    if (!isPhone() || !studyState?.active) {
+      document.getElementById("iphoneStudyBar")?.classList.add("hidden");
+      return;
+    }
+    const bar = ensureFloatingBar();
+    bar.classList.remove("hidden");
+    bar.querySelector("#iphoneStudyProgress").textContent =
+      document.getElementById("studyProgressText")?.textContent || "";
+  }
+
+  /* ---- 強制 flip + 同步浮動欄 ---- */
+  const baseRender = window.renderStudyMode;
+  window.renderStudyMode = renderStudyMode = async function (...args) {
+    if (isPhone() && studyState?.active && studyState.preferences &&
+        studyState.preferences.viewMode !== "flip") {
+      studyState.preferences.viewMode = "flip";   // 只切一次,唔會每 render 重設
+      studyState.answerVisible = false;
+    }
+    const r = await baseRender.apply(this, args);
+    syncFloatingBar();
+    return r;
+  };
+
+  /* ---- 離開掣音效(全平台統一,一處包) ---- */
+  const baseClose = window.closeStudyMode;
+  window.closeStudyMode = closeStudyMode = function (...args) {
+    try { if (typeof playSound === "function") playSound("notify"); } catch (e) {}
+    const r = baseClose.apply(this, args);
+    document.getElementById("iphoneStudyBar")?.classList.add("hidden");
+    return r;
+  };
+})();
