@@ -1940,72 +1940,7 @@ body[data-theme="night"] .mini-btn.action-soft {
   font-size: 11px;
 }
 
-/* 自訂右鍵選單 */
-.context-menu {
-  position: fixed;
-  z-index: 120;
-  min-width: 220px;
-  max-width: min(320px, calc(100vw - 24px));
-  display: none;
-  gap: 6px;
-  padding: 8px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: var(--card-strong);
-  color: var(--text);
-  box-shadow: 0 24px 70px rgba(40, 32, 26, 0.18);
-  backdrop-filter: blur(14px);
-}
 
-.context-menu.active {
-  display: grid;
-  animation: toastIn 120ms ease both;
-}
-
-.context-menu button,
-.context-menu select {
-  width: 100%;
-  min-height: 40px;
-  text-align: left;
-  border-radius: 12px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text);
-  padding: 9px 11px;
-  box-shadow: none;
-}
-
-.context-menu button:hover,
-.context-menu select:hover {
-  background: color-mix(in srgb, var(--accent-strong) 70%, var(--card-strong));
-  border-color: var(--line);
-}
-
-.context-menu button.danger {
-  color: #a9443e;
-}
-
-body[data-theme="night"] .context-menu button.danger {
-  color: #ff9b9b;
-}
-
-.context-menu-sep {
-  height: 1px;
-  background: var(--line);
-  margin: 4px 6px;
-}
-
-.context-menu-select {
-  display: grid;
-  gap: 6px;
-  padding: 7px;
-}
-
-.context-menu-select label {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
 
 /* =========================================================
    Patch v2: stat size, louder study layout, left preview rail
