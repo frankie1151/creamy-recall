@@ -3870,3 +3870,55 @@ body.iphone-mode #ipRateBar.ip-hidden { display: none !important; }
 body[data-theme="night"] #ipRateBar button[data-r="forgot"],
 body[data-theme="night"] #ipRateBar button[data-r="okay"],
 body[data-theme="night"] #ipRateBar button[data-r="remembered"] { background: #40394d; }
+/* =========================================================
+   iPhone 修正包 v4 CSS
+   ========================================================= */
+@media (max-width: 520px) and (pointer: coarse) {
+
+  /* (5) 首頁「奶油記憶」放大 */
+  body.iphone-mode .ip-brand { font-size: 19px !important; }
+  body.iphone-mode .ip-brand-ico { font-size: 24px !important; }
+
+  /* (3)(7) deck 內 / 全部卡片:強制卡片大小一致 */
+  body.iphone-mode #notesList .wall-card {
+    height: 168px !important;
+    min-height: 168px !important;
+    overflow: hidden !important;
+  }
+  body.iphone-mode #notesList .wall-card .wall-title {
+    display: -webkit-box !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
+    font-size: 16px !important;
+    line-height: 1.4 !important;
+  }
+
+  /* (1)(2) 學習圖片填滿橫向 + 內容置頂,唔好留大空白 */
+  body.iphone-mode .study-content { justify-content: flex-start !important; }
+  body.iphone-mode .study-content .inline-image-box {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    resize: none !important;
+    padding: 0 !important;
+    border: 0 !important;
+    margin: 12px 0 !important;
+  }
+  body.iphone-mode .study-content .inline-image-box img,
+  body.iphone-mode .study-content img {
+    width: 100% !important;
+    height: auto !important;
+    object-fit: contain !important;
+    cursor: zoom-in;
+  }
+
+  /* (1) lightbox 容許雙指放大 */
+  body.iphone-mode .lightbox { touch-action: pinch-zoom !important; }
+  body.iphone-mode .lightbox img {
+    touch-action: pinch-zoom !important;
+    max-width: 96vw !important;
+    max-height: 90vh !important;
+  }
+}
