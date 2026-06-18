@@ -9212,66 +9212,6 @@ if ("serviceWorker" in navigator) {
     }
   }, true);
 })();
-/* =========================================================
-   iPhone 直條沉浸版 + 離開掣音效(統一 playSound)
-   ========================================================= */
-(function () {
-  if (window.__creamyIphoneImmersive) return;
-  window.__creamyIphoneImmersive = true;
-
-  const mq = window.matchMedia("(max-width: 480px) and (pointer: coarse)");
-  const isPhone = () => mq.matches;
-
-  function setBodyClass() {
-    document.body.classList.toggle("iphone-mode", isPhone());
-  }
-  setBodyClass();
-  mq.addEventListener ? mq.addEventListener("change", setBodyClass) : mq.addListener(setBodyClass);
-  window.addEventListener("resize", setBodyClass);
-  window.addEventListener("orientationchange", () => setTimeout(setBodyClass, 60));
-
-  /* ---- 浮動頂欄:離開 + 進度 ---- */
-  function ensureFloatingBar() {
-    let bar = document.getElementById("iphoneStudyBar");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "iphoneStudyBar";
-      bar.innerHTML = `
-        <button type="button" id="iphoneStudyExit" aria-label="離開">‹ 離開</button>
-        <span id="iphoneStudyProgress"></span>
-      `;
-      document.body.appendChild(bar);
-      bar.querySelector("#iphoneStudyExit").addEventListener("click", e => {
-        e.preventDefault();
-        closeStudyMode();           // 音效喺 closeStudyMode wrap 處理,唔重複
-      });
-    }
-    return bar;
-  }
-
-  function syncFloatingBar() {
-    if (!isPhone() || !studyState?.active) {
-      document.getElementById("iphoneStudyBar")?.classList.add("hidden");
-      return;
-    }
-    const bar = ensureFloatingBar();
-    bar.classList.remove("hidden");
-    bar.querySelector("#iphoneStudyProgress").textContent =
-      document.getElementById("studyProgressText")?.textContent || "";
-  }
-
-  /* ---- 強制 flip + 同步浮動欄 ---- */
-  const baseRender = window.renderStudyMode;
-  window.renderStudyMode = renderStudyMode = async function (...args) {
-    if (isPhone() && studyState?.active && studyState.preferences &&
-        studyState.preferences.viewMode !== "flip") {
-      studyState.preferences.viewMode = "flip";   // 只切一次,唔會每 render 重設
-      studyState.answerVisible = false;
-    }
-    const r = await baseRender.apply(this, args);
-    syncFloatingBar();
-    return r;
-  };
 
   /* ---- 離開掣音效(全平台統一,一處包) ---- */
   const baseClose = window.closeStudyMode;
@@ -9283,28 +9223,54 @@ if ("serviceWorker" in navigator) {
   };
 })();
 /* =========================================================
-   iPhone 全重做:乾淨主頁 + deck 牆 + 沉浸翻卡 + 離開音效
-   取代舊 iPhone block
+   iPhone 統一版 v3:brand 主頁 + deck 牆 + 沉浸翻卡
+   + 主題切換 + 翻面評分bar + 文字大小拖拉 + iOS單擊修正
+   取代所有舊 iPhone block
    ========================================================= */
 (function () {
-  if (window.__creamyIphoneUIv2) return;
-  window.__creamyIphoneUIv2 = true;
+  if (window.__creamyIphoneUIv3) return;
+  window.__creamyIphoneUIv3 = true;
 
   const mq = window.matchMedia("(max-width: 520px) and (pointer: coarse)");
   const isPhone = () => mq.matches;
   const el = id => document.getElementById(id);
+  const snd = (t = "preview") => { try { playSound(t); } catch (e) {} };
 
-  /* ---- icons ---- */
   const I = {
-    gear: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1l-.3-2.5h-4l-.3 2.5a7 7 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5c.07-.33.1-.66.1-1z"/></svg>`,
     search: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>`,
     back: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 5l-7 7 7 7"/></svg>`,
     plus: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>`,
+    palette: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.5-.8 1.5-1.5 0-.5-.3-.9-.6-1.3-.3-.4-.6-.8-.6-1.2 0-.8.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4-4-7.5-9-7.5z"/><circle cx="7.5" cy="11.5" r="1.2" fill="currentColor"/><circle cx="12" cy="8" r="1.2" fill="currentColor"/><circle cx="16.5" cy="11.5" r="1.2" fill="currentColor"/></svg>`,
     cards: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="8" y="3" width="13" height="15" rx="2.5"/><path d="M4 7v11a2.5 2.5 0 0 0 2.5 2.5H16"/></svg>`,
     bolt: `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M13 2 4 14h5l-1 8 9-12h-5l1-6z"/></svg>`
   };
 
-  function setBody() { document.body.classList.toggle("iphone-mode", isPhone()); syncChrome(); }
+  const THEME_SW = {
+    cream: "#e8b8a4", lavender: "#b39adf", mint: "#8fcdb8",
+    sky: "#8ebce6", night: "#343040", library: "#a06c3e", mono: "#444444"
+  };
+
+  /* ---- iOS 單擊修正:pointerup + 防鬼影 click ---- */
+  function ipTap(elm, fn) {
+    if (!elm || elm.__ipTap) return;
+    elm.__ipTap = true;
+    let sx = 0, sy = 0, st = 0, moved = false, active = false;
+    elm.addEventListener("pointerdown", e => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      active = true; moved = false; sx = e.clientX; sy = e.clientY; st = Date.now();
+    }, { passive: true });
+    elm.addEventListener("pointermove", e => {
+      if (active && (Math.abs(e.clientX - sx) > 12 || Math.abs(e.clientY - sy) > 12)) moved = true;
+    }, { passive: true });
+    elm.addEventListener("pointerup", e => {
+      if (!active) return; active = false;
+      if (moved || Date.now() - st > 700) return;
+      e.preventDefault();
+      fn(e);
+    });
+    elm.addEventListener("pointercancel", () => { active = false; });
+    elm.addEventListener("click", e => { e.preventDefault(); e.stopImmediatePropagation(); }, true);
+  }
 
   /* ---------- 主頁 deck 格(圖一) ---------- */
   const baseRenderDecks = renderSubjectDecks;
@@ -9329,53 +9295,79 @@ if ("serviceWorker" in navigator) {
     if (typeof enableSubjectDeckDragSortFinal === "function") enableSubjectDeckDragSortFinal();
   };
 
-  /* ---------- 小 + 選單 ---------- */
-  function ipMiniMenu(x, y, items) {
+  /* ---------- 小選單 ---------- */
+  function ipMiniMenu(anchor, items) {
     let m = el("ipMiniMenu");
     if (!m) { m = document.createElement("div"); m.id = "ipMiniMenu"; document.body.appendChild(m); }
     m.innerHTML = items.map((it, i) => `<button type="button" data-i="${i}">${escapeHtml(it.label)}</button>`).join("");
     m.style.display = "grid";
-    m.style.left = Math.max(10, Math.min(x, window.innerWidth - 190)) + "px";
-    m.style.top = Math.max(10, Math.min(y, window.innerHeight - 40 - items.length * 50)) + "px";
-    m.onclick = e => {
-      const b = e.target.closest("[data-i]"); if (!b) return;
-      m.style.display = "none"; items[+b.dataset.i].onClick();
-    };
+    const r = anchor.getBoundingClientRect();
+    let x = r.right - 180, y = r.bottom + 8;
+    if (y + items.length * 52 > window.innerHeight - 12) y = r.top - items.length * 52 - 8;
+    x = Math.max(10, Math.min(x, window.innerWidth - 190));
+    y = Math.max(10, y);
+    m.style.left = x + "px"; m.style.top = y + "px";
+    m.querySelectorAll("[data-i]").forEach(btn => ipTap(btn, () => {
+      m.style.display = "none"; snd();
+      items[+btn.dataset.i].onClick();
+    }));
   }
-  document.addEventListener("click", e => {
-    const m = el("ipMiniMenu");
-    if (m && m.style.display !== "none" && !e.target.closest("#ipMiniMenu") && !e.target.closest('[data-act="add"]'))
+
+  /* ---------- 主題選單 ---------- */
+  function ipThemeMenu() {
+    let m = el("ipThemeMenu");
+    if (!m) { m = document.createElement("div"); m.id = "ipThemeMenu"; document.body.appendChild(m); }
+    const cur = appState.settings.theme || "cream";
+    m.innerHTML = Object.keys(THEME_SW).map(k =>
+      `<button type="button" data-theme="${k}" class="${cur === k ? "on" : ""}" aria-label="${escapeAttr(THEMES[k]?.label || k)}"><i style="background:${THEME_SW[k]}"></i></button>`
+    ).join("");
+    m.style.display = "flex";
+    m.querySelectorAll("[data-theme]").forEach(btn => ipTap(btn, () => {
+      const t = btn.dataset.theme;
+      applyTheme(t); requestSave("主題已更新"); snd("theme");
       m.style.display = "none";
+      showToast("已套用主題", THEMES[t]?.label || "", "success");
+    }));
+  }
+
+  document.addEventListener("pointerdown", e => {
+    const mm = el("ipMiniMenu"), tm = el("ipThemeMenu");
+    if (mm && mm.style.display !== "none" && !e.target.closest("#ipMiniMenu") && !e.target.closest('[data-act="add"]')) mm.style.display = "none";
+    if (tm && tm.style.display !== "none" && !e.target.closest("#ipThemeMenu") && !e.target.closest('[data-act="theme"]')) tm.style.display = "none";
   }, true);
 
   /* ---------- 主頁頂欄 ---------- */
+  function updateCloud() {
+    const c = el("ipHomeCloud");
+    if (c) c.textContent = (el("saveHint")?.textContent) || (els.saveText?.textContent) || "";
+  }
   function ensureHomeBar() {
     let b = el("ipHomeBar");
     if (!b) {
       b = document.createElement("div"); b.id = "ipHomeBar"; b.className = "ip-bar";
       b.innerHTML = `
-        <button class="ip-bar-btn" data-act="settings" aria-label="設定">${I.gear}</button>
+        <span class="ip-brand"><span class="ip-brand-ico">🧈</span>奶油記憶</span>
         <span id="ipHomeCloud" class="ip-bar-cloud"></span>
-        <button class="ip-bar-btn ip-bar-right" data-act="search" aria-label="搜尋">${I.search}</button>
+        <button class="ip-bar-btn" data-act="theme" aria-label="主題">${I.palette}</button>
+        <button class="ip-bar-btn" data-act="search" aria-label="搜尋">${I.search}</button>
         <button class="ip-bar-btn" data-act="add" aria-label="新增">${I.plus}</button>`;
       document.body.appendChild(b);
-      b.addEventListener("click", e => {
-        const btn = e.target.closest("[data-act]"); if (!btn) return;
+      b.querySelectorAll("[data-act]").forEach(btn => ipTap(btn, () => {
+        snd();
         const a = btn.dataset.act;
-        if (a === "settings") switchView("settings");
+        if (a === "theme") ipThemeMenu();
         if (a === "search") { switchView("notes"); document.body.classList.add("ip-show-search"); setTimeout(() => els.searchInput?.focus(), 80); }
-        if (a === "add") ipMiniMenu(e.clientX || 999, e.clientY || 60, [
+        if (a === "add") ipMiniMenu(btn, [
           { label: "＋ 新增卡片", onClick: () => openModal(null) },
           { label: "＋ 新增 Deck", onClick: () => openDeckModal() }
         ]);
-      });
+      }));
     }
-    const c = el("ipHomeCloud");
-    if (c) c.textContent = (el("saveHint")?.textContent) || (els.saveText?.textContent) || "";
+    updateCloud();
     return b;
   }
 
-  /* ---------- 次級頂欄(deck 牆 / 設定 / 其他)圖六 ---------- */
+  /* ---------- 次級頂欄(deck 牆 / 設定) ---------- */
   function ensureTopBar() {
     let b = el("ipTopBar");
     if (!b) {
@@ -9386,8 +9378,8 @@ if ("serviceWorker" in navigator) {
         <button class="ip-bar-btn" data-act="search" aria-label="搜尋">${I.search}</button>
         <button class="ip-bar-btn" data-act="add" aria-label="新增">${I.plus}</button>`;
       document.body.appendChild(b);
-      b.addEventListener("click", e => {
-        const btn = e.target.closest("[data-act]"); if (!btn) return;
+      b.querySelectorAll("[data-act]").forEach(btn => ipTap(btn, () => {
+        snd();
         const a = btn.dataset.act;
         if (a === "back") {
           document.body.classList.remove("ip-show-search");
@@ -9395,10 +9387,8 @@ if ("serviceWorker" in navigator) {
           else switchView("home");
         }
         if (a === "search") { document.body.classList.toggle("ip-show-search"); if (document.body.classList.contains("ip-show-search")) setTimeout(() => els.searchInput?.focus(), 60); }
-        if (a === "add") ipMiniMenu(e.clientX || 999, e.clientY || 60, [
-          { label: "＋ 新增卡片", onClick: () => openModal(null, { deckId: currentDeckWall || "" }) }
-        ]);
-      });
+        if (a === "add") ipMiniMenu(btn, [{ label: "＋ 新增卡片", onClick: () => openModal(null, { deckId: currentDeckWall || "" }) }]);
+      }));
     }
     const t = el("ipTopTitle");
     if (t) t.textContent = (currentView === "notes")
@@ -9414,10 +9404,11 @@ if ("serviceWorker" in navigator) {
   function ensureFab() {
     let f = el("ipStudyFab");
     if (!f) {
-      f = document.createElement("button"); f.id = "ipStudyFab"; f.type = "button";
+      f = document.createElement("button"); f.id = "ipStudyFab"; f.className = "ip-fab"; f.type = "button";
       f.innerHTML = `${I.bolt}<span>開始複習</span>`;
       document.body.appendChild(f);
-      f.addEventListener("click", () => {
+      ipTap(f, () => {
+        snd();
         if (currentDeckWall) openStudyPreference({ type: "deck", deckId: currentDeckWall });
         else openStudyPreference({ type: "today" });
       });
@@ -9425,30 +9416,91 @@ if ("serviceWorker" in navigator) {
     return f;
   }
 
-  /* ---------- 沉浸學習頂欄 ---------- */
+  /* ---------- 學習頂欄(離開 + 文字大小拖拉 + 進度) ---------- */
+  function applyStudyFont() {
+    const v = parseInt(localStorage.getItem("creamy.ip.studyFont") || "21", 10);
+    document.documentElement.style.setProperty("--ip-study-font", v + "px");
+    const fr = el("ipFontRange");
+    if (fr && fr.value !== String(v)) fr.value = v;
+  }
   function ensureStudyBar() {
     let bar = el("ipStudyBar");
     if (!bar) {
       bar = document.createElement("div"); bar.id = "ipStudyBar"; bar.className = "ip-bar";
-      bar.innerHTML = `<button id="ipStudyExit" type="button">${I.back}<span>離開</span></button><span id="ipStudyProg" class="ip-bar-cloud ip-bar-right"></span>`;
+      bar.innerHTML = `
+        <button id="ipStudyExit" type="button">${I.back}<span>離開</span></button>
+        <span class="ip-font-mini">A</span>
+        <input id="ipFontRange" type="range" min="15" max="32" step="1" aria-label="文字大小">
+        <span class="ip-font-big">A</span>
+        <span id="ipStudyProg" class="ip-bar-cloud"></span>`;
       document.body.appendChild(bar);
-      el("ipStudyExit").addEventListener("click", e => { e.preventDefault(); closeStudyMode(); });
+      ipTap(el("ipStudyExit"), () => closeStudyMode());
+      const fr = el("ipFontRange");
+      fr.addEventListener("input", () => {
+        const v = parseInt(fr.value, 10);
+        document.documentElement.style.setProperty("--ip-study-font", v + "px");
+        localStorage.setItem("creamy.ip.studyFont", String(v));
+      });
     }
+    applyStudyFont();
     const p = el("ipStudyProg");
     if (p) p.textContent = el("studyProgressText")?.textContent || "";
     return bar;
   }
 
+  /* ---------- 翻面評分 bar ---------- */
+  function act(a) { (window.applyStudyAction || applyStudyAction)(a); }
+  function ensureRateBar() {
+    let bar = el("ipRateBar");
+    if (!bar) {
+      bar = document.createElement("div"); bar.id = "ipRateBar"; bar.className = "ip-hidden";
+      bar.innerHTML = `
+        <button data-r="forgot">忘了</button>
+        <button data-r="okay">普通</button>
+        <button data-r="remembered">記住了</button>
+        <button data-r="more" aria-label="更多">⋯</button>`;
+      document.body.appendChild(bar);
+      bar.querySelectorAll("button").forEach(btn => ipTap(btn, () => {
+        const r = btn.dataset.r;
+        if (r === "more") {
+          snd();
+          ipMiniMenu(btn, [
+            { label: "已熟記", onClick: () => act("mastered") },
+            { label: "稍後再看", onClick: () => act("later") },
+            { label: "翻面", onClick: () => (window.toggleStudyReveal || toggleStudyReveal)() },
+            { label: "上一張", onClick: () => (window.studyPrev || studyPrev)() },
+            { label: "下一張", onClick: () => (window.studyNext || studyNext)() }
+          ]);
+          return;
+        }
+        act(r); // 評分音效由 applyStudyAction 自己播
+      }));
+    }
+    return bar;
+  }
+  function syncRateBar() {
+    const bar = el("ipRateBar"); if (!bar) return;
+    const complete = els.studyCompleteState && !els.studyCompleteState.classList.contains("hidden");
+    const show = isPhone() && studyState?.active && studyState.answerVisible && !complete;
+    bar.classList.toggle("ip-hidden", !show);
+  }
+  function observeFlip() {
+    const inner = el("studyCardInner");
+    if (!inner || inner.__ipFlipObs) return;
+    inner.__ipFlipObs = true;
+    new MutationObserver(syncRateBar).observe(inner, { attributes: true, attributeFilter: ["class"] });
+  }
+
+  /* ---------- chrome 同步 ---------- */
   function hide(id) { el(id)?.classList.add("ip-hidden"); }
   function show(fn) { const e = fn(); e.classList.remove("ip-hidden"); return e; }
 
   function syncChrome() {
     if (!isPhone()) {
-      ["ipHomeBar", "ipTopBar", "ipStudyBar", "ipStudyFab"].forEach(hide);
+      ["ipHomeBar", "ipTopBar", "ipStudyBar", "ipStudyFab", "ipRateBar"].forEach(hide);
       document.body.classList.remove("ip-show-search");
       return;
     }
-    // 標記要收起嘅主頁區塊
     els.todayTasksList?.closest(".section-card")?.classList.add("ip-hide-on-phone");
     els.subjectDeckGrid?.closest(".section-card")?.querySelector(".section-title-row")?.classList.add("ip-hide-on-phone");
 
@@ -9457,9 +9509,10 @@ if ("serviceWorker" in navigator) {
     if (inStudy) {
       ["ipHomeBar", "ipTopBar", "ipStudyFab"].forEach(hide);
       show(ensureStudyBar);
+      ensureRateBar(); observeFlip(); syncRateBar();
       return;
     }
-    hide("ipStudyBar");
+    hide("ipStudyBar"); hide("ipRateBar");
 
     if (currentView === "home") { show(ensureHomeBar); hide("ipTopBar"); hide("ipStudyFab"); }
     else {
@@ -9468,6 +9521,8 @@ if ("serviceWorker" in navigator) {
       if (currentView === "notes") show(ensureFab); else hide("ipStudyFab");
     }
   }
+
+  function setBody() { document.body.classList.toggle("iphone-mode", isPhone()); syncChrome(); }
 
   /* ---------- wrap ---------- */
   const baseRenderAll = window.renderAll;
@@ -9488,11 +9543,16 @@ if ("serviceWorker" in navigator) {
       studyState.preferences.viewMode = "flip"; studyState.answerVisible = false;
     }
     const r = await baseRenderStudy.apply(this, arguments);
-    if (isPhone()) syncChrome();
+    if (isPhone()) { applyStudyFont(); syncChrome(); syncRateBar(); }
     return r;
   };
+
+  setInterval(() => {
+    if (isPhone() && el("ipHomeBar") && !el("ipHomeBar").classList.contains("ip-hidden")) updateCloud();
+  }, 3000);
 
   setBody();
   mq.addEventListener ? mq.addEventListener("change", setBody) : mq.addListener(setBody);
   window.addEventListener("orientationchange", () => setTimeout(setBody, 80));
 })();
+
