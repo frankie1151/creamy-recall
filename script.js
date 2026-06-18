@@ -9213,15 +9213,6 @@ if ("serviceWorker" in navigator) {
   }, true);
 })();
 
-  /* ---- 離開掣音效(全平台統一,一處包) ---- */
-  const baseClose = window.closeStudyMode;
-  window.closeStudyMode = closeStudyMode = function (...args) {
-    try { if (typeof playSound === "function") playSound("notify"); } catch (e) {}
-    const r = baseClose.apply(this, args);
-    document.getElementById("iphoneStudyBar")?.classList.add("hidden");
-    return r;
-  };
-})();
 /* =========================================================
    iPhone 統一版 v3:brand 主頁 + deck 牆 + 沉浸翻卡
    + 主題切換 + 翻面評分bar + 文字大小拖拉 + iOS單擊修正
