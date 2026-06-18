@@ -9546,4 +9546,74 @@ if ("serviceWorker" in navigator) {
   mq.addEventListener ? mq.addEventListener("change", setBody) : mq.addListener(setBody);
   window.addEventListener("orientationchange", () => setTimeout(setBody, 80));
 })();
+/* =========================================================
+   iPhone 修正包 v4:圖片放大 / 卡片統一 / 退出回首頁 /
+   主題誤觸 deck / 圖片填滿
+   ========================================================= */
+(function () {
+  if (window.__creamyIphoneFixV4) return;
+  window.__creamyIphoneFixV4 = true;
+  const isPhone = () => document.body.classList.contains("iphone-mode");
+  const swallowNextClick = () => {
+    window.__ipSwallow = true;
+    setTimeout(() => { window.__ipSwallow = false; }, 500);
+  };
 
+  /* 吞走鬼影 click(pointerup 之後嗰下) */
+  document.addEventListener("click", e => {
+    if (window.__ipSwallow) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      window.__ipSwallow = false;
+    }
+  }, true);
+
+  /* (6) 揀主題後唔好誤觸後面 deck */
+  document.addEventListener("pointerup", e => {
+    if (e.target.closest("#ipThemeMenu [data-theme]")) swallowNextClick();
+  }, true);
+
+  /* (4) deck / 全部卡片 撳返回 → 直接回首頁 */
+  document.addEventListener("pointerup", e => {
+    if (!isPhone()) return;
+    const back = e.target.closest('#ipTopBar [data-act="back"]');
+    if (!back) return;
+    if (currentView !== "notes") return;   /* 其他 view 交返原本 handler */
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    document.body.classList.remove("ip-show-search");
+    currentDeckWall = "";
+    if (els.filterDeck) els.filterDeck.value = "";
+    switchView("home");
+    swallowNextClick();
+  }, true);
+
+  /* (1) 學習模式 tap 圖片 → 放大(iOS 翻卡 patch 會食咗 click,要用 pointerup) */
+  let sx = 0, sy = 0, moved = false, active = false, target = null;
+  document.addEventListener("pointerdown", e => {
+    if (!isPhone()) return;
+    const img = e.target.closest(".study-content img, .study-face img, .flip-content img");
+    if (!img) return;
+    active = true; moved = false; target = img; sx = e.clientX; sy = e.clientY;
+  }, true);
+  document.addEventListener("pointermove", e => {
+    if (active && (Math.abs(e.clientX - sx) > 12 || Math.abs(e.clientY - sy) > 12)) moved = true;
+  }, true);
+  document.addEventListener("pointerup", e => {
+    if (!active) return; active = false;
+    const img = target; target = null;
+    if (moved || !img || !img.src) return;
+    e.preventDefault();
+    if (typeof openLightbox === "function") openLightbox(img.src);
+    swallowNextClick();
+  }, true);
+
+  /* tap 背景關閉 lightbox(tap 圖片本身唔關,留俾雙指放大) */
+  document.addEventListener("pointerup", e => {
+    if (!isPhone()) return;
+    const lb = document.getElementById("lightboxModal");
+    if (!lb || lb.classList.contains("hidden")) return;
+    if (e.target.closest("img")) return;
+    if (typeof closeLightbox === "function") closeLightbox();
+  }, true);
+})();
