@@ -1828,48 +1828,7 @@ body[data-theme="night"] .mini-btn.action-soft {
    Patch: split depth, context menu, cleaner deck/cards
    ========================================================= */
 
-/* Split 模式：格子變深，並可拖拉高度 */
-.study-card-split {
-  height: var(--study-depth, min(82vh, 920px));
-  min-height: 560px;
-  max-height: calc(100vh - 210px);
-  resize: vertical;
-  overflow: auto;
-  padding-bottom: 16px;
-}
 
-.study-card-split .split-panel {
-  min-height: 520px;
-}
-
-.study-card-split::after {
-  content: "拖曳右下角可調整 Split 深度";
-  grid-column: 1 / -1;
-  justify-self: center;
-  color: var(--muted);
-  font-size: 12px;
-  padding-top: 6px;
-  opacity: 0.72;
-}
-
-/* 手機仍然不要太高 */
-@media (max-width: 1200px) {
-  .study-card-split {
-    height: auto;
-    min-height: auto;
-    max-height: none;
-    resize: none;
-    overflow: visible;
-  }
-
-  .study-card-split .split-panel {
-    min-height: 360px;
-  }
-
-  .study-card-split::after {
-    display: none;
-  }
-}
 
 /* Deck 卡片下方按鈕不再常駐顯示：改用右鍵 */
 .deck-actions-row {
@@ -1919,28 +1878,6 @@ body[data-theme="night"] .mini-btn.action-soft {
 .wall-card .wall-card-top {
   opacity: 0.78;
 }
-
-.wall-bottom-subtle {
-  margin-top: auto;
-  color: var(--muted);
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.wall-bottom-subtle::before {
-  content: "Ⓝ";
-  width: 21px;
-  height: 21px;
-  border: 1px dashed var(--line-strong);
-  border-radius: 999px;
-  display: inline-grid;
-  place-items: center;
-  font-size: 11px;
-}
-
-
 
 /* =========================================================
    Patch v2: stat size, louder study layout, left preview rail
