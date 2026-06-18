@@ -1,4 +1,4 @@
-const CACHE_NAME = "creamy-recall-cache-v26";
+const CACHE_NAME = "creamy-recall-cache-v27";
 const ASSETS = [
   "./",
   "./index.html",
