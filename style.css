@@ -1962,13 +1962,6 @@ body[data-theme="night"] .mini-btn.action-soft {
   outline-offset: 4px;
 }
 
-/* 讓 button 版 preview 不吃瀏覽器預設樣式 */
-button.study-preview-card {
-  font: inherit;
-  color: inherit;
-  appearance: none;
-  -webkit-appearance: none;
-}
 
 /* 搜尋後被隱藏時不要留空隙 */
 .study-preview-card[style*="display: none"] {
@@ -2131,13 +2124,6 @@ button.study-preview-card {
 .study-preview-card:focus-visible {
   outline: 4px solid color-mix(in srgb, var(--primary) 28%, transparent);
   outline-offset: 4px;
-}
-
-.study-preview-card.active {
-  border-color: #21c65a;
-  box-shadow:
-    0 0 0 3px rgba(33, 198, 90, 0.18),
-    var(--shadow-soft);
 }
 
 .study-preview-card.from-all-decks {
