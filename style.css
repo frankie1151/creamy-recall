@@ -3722,3 +3722,104 @@ button, a, select, input, label,
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28) !important;
   }
 }
+/* =========================================================
+   iPhone 直條沉浸版:只 flip、全屏閱讀
+   主控用 body.iphone-mode(JS 判斷,最可靠)
+   ========================================================= */
+
+#iphoneStudyBar { display: none; }
+
+body.iphone-mode #iphoneStudyBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 70;
+  height: calc(48px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 14px 0;
+  background: color-mix(in srgb, var(--bg-soft) 92%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+body.iphone-mode #iphoneStudyBar.hidden { display: none; }
+
+#iphoneStudyExit { font-weight: 800; font-size: 15px; color: var(--text); padding: 8px 4px; }
+#iphoneStudyExit:active { opacity: .7; }
+#iphoneStudyProgress { color: var(--muted); font-weight: 800; font-size: 14px; }
+
+/* ---- shell 全寬單欄 ---- */
+body.iphone-mode .study-mode { padding: 0 !important; }
+body.iphone-mode .study-shell,
+body.iphone-mode .study-shell.study-with-rail {
+  width: 100% !important;
+  grid-template-columns: 1fr !important;
+  gap: 8px !important;
+  padding: 0 !important;
+}
+
+/* ---- 收起:左欄/拖拉/對照/常漏/編輯/原頂欄/進度條/badge ---- */
+body.iphone-mode #studyPreviewRail,
+body.iphone-mode #studyRailResizer,
+body.iphone-mode #studySplitResizer,
+body.iphone-mode #studyCardSplit,
+body.iphone-mode .study-topbar,
+body.iphone-mode .study-progress-wrap,
+body.iphone-mode .study-inline-editbar,
+body.iphone-mode .study-meta-row,
+body.iphone-mode #studyMissedPointZone,
+body.iphone-mode #studyQuickMetaBar,
+body.iphone-mode .study-quick-meta-v2,
+body.iphone-mode #studyEditBtn,
+body.iphone-mode #toggleStudyLayoutBtn {
+  display: none !important;
+}
+
+/* ---- 翻卡食滿全屏 ---- */
+body.iphone-mode #studyStage,
+body.iphone-mode #studyCompleteState {
+  padding-top: calc(56px + env(safe-area-inset-top)) !important;
+  grid-column: 1 !important;
+}
+body.iphone-mode #studyCardFlip { margin: 0 !important; }
+body.iphone-mode .study-card-inner {
+  height: calc(100dvh - 250px) !important;
+  min-height: 0 !important;
+}
+body.iphone-mode .study-face { border-radius: 18px; padding: 16px; }
+body.iphone-mode .study-content { font-size: 19px; line-height: 1.72; }
+
+/* ---- 底部評分 + 上一張/下一張:固定貼底 ---- */
+body.iphone-mode .study-bottom-layout {
+  display: block !important;
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 65;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) !important;
+  background: color-mix(in srgb, var(--bg-soft) 94%, transparent);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+}
+body.iphone-mode .study-bottom-controls { display: grid !important; gap: 8px !important; }
+
+body.iphone-mode .study-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px !important;
+  width: 100% !important;
+}
+body.iphone-mode .study-actions .mini-btn {
+  flex: 1 1 30%;
+  min-height: 46px;
+  padding: 8px 4px;
+  justify-content: center;
+}
+body.iphone-mode .study-nav-row {
+  display: flex !important;
+  gap: 8px !important;
+  width: 100% !important;
+}
+body.iphone-mode .study-nav-row .mini-btn { flex: 1; min-height: 44px; justify-content: center; }
+
+/* ---- 首頁:收起「今日任務」(Safari 15.4+ :has) ---- */
+body.iphone-mode .section-card:has(#todayTasksList) { display: none !important; }
