@@ -9282,3 +9282,217 @@ if ("serviceWorker" in navigator) {
     return r;
   };
 })();
+/* =========================================================
+   iPhone 全重做:乾淨主頁 + deck 牆 + 沉浸翻卡 + 離開音效
+   取代舊 iPhone block
+   ========================================================= */
+(function () {
+  if (window.__creamyIphoneUIv2) return;
+  window.__creamyIphoneUIv2 = true;
+
+  const mq = window.matchMedia("(max-width: 520px) and (pointer: coarse)");
+  const isPhone = () => mq.matches;
+  const el = id => document.getElementById(id);
+
+  /* ---- icons ---- */
+  const I = {
+    gear: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1l-.3-2.5h-4l-.3 2.5a7 7 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5c.07-.33.1-.66.1-1z"/></svg>`,
+    search: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>`,
+    back: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 5l-7 7 7 7"/></svg>`,
+    plus: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>`,
+    cards: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="8" y="3" width="13" height="15" rx="2.5"/><path d="M4 7v11a2.5 2.5 0 0 0 2.5 2.5H16"/></svg>`,
+    bolt: `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M13 2 4 14h5l-1 8 9-12h-5l1-6z"/></svg>`
+  };
+
+  function setBody() { document.body.classList.toggle("iphone-mode", isPhone()); syncChrome(); }
+
+  /* ---------- 主頁 deck 格(圖一) ---------- */
+  const baseRenderDecks = renderSubjectDecks;
+  renderSubjectDecks = function () {
+    if (!isPhone()) return baseRenderDecks.apply(this, arguments);
+    const grid = els.subjectDeckGrid;
+    if (!grid) return;
+    const decks = getSubjectDeckOrderFinal();
+    grid.innerHTML = decks.map(deck => {
+      const s = getDeckStats(deck.id);
+      return `
+      <div class="deck-wrap ip-deck-wrap" data-deck-id="${escapeAttr(deck.id)}" data-context-deck="${escapeAttr(deck.id)}" draggable="true">
+        <button class="subject-deck ip-deck" type="button" style="--deck-color:${escapeAttr(deck.color)}" onclick="openDeckWall('${escapeAttr(deck.id)}')">
+          <span class="ip-deck-count">${I.cards}${s.total}</span>
+          <span class="ip-deck-due">${I.bolt}${s.due}</span>
+          <span class="ip-deck-more" role="button" aria-label="更多"
+            onclick="event.stopPropagation();event.preventDefault();this.closest('.deck-wrap').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:(event.clientX||120),clientY:(event.clientY||200)}));">⋯</span>
+        </button>
+        <div class="ip-deck-name">${escapeHtml(deck.name)}</div>
+      </div>`;
+    }).join("");
+    if (typeof enableSubjectDeckDragSortFinal === "function") enableSubjectDeckDragSortFinal();
+  };
+
+  /* ---------- 小 + 選單 ---------- */
+  function ipMiniMenu(x, y, items) {
+    let m = el("ipMiniMenu");
+    if (!m) { m = document.createElement("div"); m.id = "ipMiniMenu"; document.body.appendChild(m); }
+    m.innerHTML = items.map((it, i) => `<button type="button" data-i="${i}">${escapeHtml(it.label)}</button>`).join("");
+    m.style.display = "grid";
+    m.style.left = Math.max(10, Math.min(x, window.innerWidth - 190)) + "px";
+    m.style.top = Math.max(10, Math.min(y, window.innerHeight - 40 - items.length * 50)) + "px";
+    m.onclick = e => {
+      const b = e.target.closest("[data-i]"); if (!b) return;
+      m.style.display = "none"; items[+b.dataset.i].onClick();
+    };
+  }
+  document.addEventListener("click", e => {
+    const m = el("ipMiniMenu");
+    if (m && m.style.display !== "none" && !e.target.closest("#ipMiniMenu") && !e.target.closest('[data-act="add"]'))
+      m.style.display = "none";
+  }, true);
+
+  /* ---------- 主頁頂欄 ---------- */
+  function ensureHomeBar() {
+    let b = el("ipHomeBar");
+    if (!b) {
+      b = document.createElement("div"); b.id = "ipHomeBar"; b.className = "ip-bar";
+      b.innerHTML = `
+        <button class="ip-bar-btn" data-act="settings" aria-label="設定">${I.gear}</button>
+        <span id="ipHomeCloud" class="ip-bar-cloud"></span>
+        <button class="ip-bar-btn ip-bar-right" data-act="search" aria-label="搜尋">${I.search}</button>
+        <button class="ip-bar-btn" data-act="add" aria-label="新增">${I.plus}</button>`;
+      document.body.appendChild(b);
+      b.addEventListener("click", e => {
+        const btn = e.target.closest("[data-act]"); if (!btn) return;
+        const a = btn.dataset.act;
+        if (a === "settings") switchView("settings");
+        if (a === "search") { switchView("notes"); document.body.classList.add("ip-show-search"); setTimeout(() => els.searchInput?.focus(), 80); }
+        if (a === "add") ipMiniMenu(e.clientX || 999, e.clientY || 60, [
+          { label: "＋ 新增卡片", onClick: () => openModal(null) },
+          { label: "＋ 新增 Deck", onClick: () => openDeckModal() }
+        ]);
+      });
+    }
+    const c = el("ipHomeCloud");
+    if (c) c.textContent = (el("saveHint")?.textContent) || (els.saveText?.textContent) || "";
+    return b;
+  }
+
+  /* ---------- 次級頂欄(deck 牆 / 設定 / 其他)圖六 ---------- */
+  function ensureTopBar() {
+    let b = el("ipTopBar");
+    if (!b) {
+      b = document.createElement("div"); b.id = "ipTopBar"; b.className = "ip-bar";
+      b.innerHTML = `
+        <button class="ip-bar-btn" data-act="back" aria-label="返回">${I.back}</button>
+        <span id="ipTopTitle" class="ip-bar-title"></span>
+        <button class="ip-bar-btn" data-act="search" aria-label="搜尋">${I.search}</button>
+        <button class="ip-bar-btn" data-act="add" aria-label="新增">${I.plus}</button>`;
+      document.body.appendChild(b);
+      b.addEventListener("click", e => {
+        const btn = e.target.closest("[data-act]"); if (!btn) return;
+        const a = btn.dataset.act;
+        if (a === "back") {
+          document.body.classList.remove("ip-show-search");
+          if (currentView === "notes" && currentDeckWall) clearDeckWall();
+          else switchView("home");
+        }
+        if (a === "search") { document.body.classList.toggle("ip-show-search"); if (document.body.classList.contains("ip-show-search")) setTimeout(() => els.searchInput?.focus(), 60); }
+        if (a === "add") ipMiniMenu(e.clientX || 999, e.clientY || 60, [
+          { label: "＋ 新增卡片", onClick: () => openModal(null, { deckId: currentDeckWall || "" }) }
+        ]);
+      });
+    }
+    const t = el("ipTopTitle");
+    if (t) t.textContent = (currentView === "notes")
+      ? (currentDeckWall ? getDeckName(currentDeckWall) : "全部卡片")
+      : (els.pageTitle?.textContent || "");
+    b.querySelectorAll('[data-act="search"],[data-act="add"]').forEach(x => {
+      x.style.display = currentView === "notes" ? "inline-flex" : "none";
+    });
+    return b;
+  }
+
+  /* ---------- 開始複習 FAB ---------- */
+  function ensureFab() {
+    let f = el("ipStudyFab");
+    if (!f) {
+      f = document.createElement("button"); f.id = "ipStudyFab"; f.type = "button";
+      f.innerHTML = `${I.bolt}<span>開始複習</span>`;
+      document.body.appendChild(f);
+      f.addEventListener("click", () => {
+        if (currentDeckWall) openStudyPreference({ type: "deck", deckId: currentDeckWall });
+        else openStudyPreference({ type: "today" });
+      });
+    }
+    return f;
+  }
+
+  /* ---------- 沉浸學習頂欄 ---------- */
+  function ensureStudyBar() {
+    let bar = el("ipStudyBar");
+    if (!bar) {
+      bar = document.createElement("div"); bar.id = "ipStudyBar"; bar.className = "ip-bar";
+      bar.innerHTML = `<button id="ipStudyExit" type="button">${I.back}<span>離開</span></button><span id="ipStudyProg" class="ip-bar-cloud ip-bar-right"></span>`;
+      document.body.appendChild(bar);
+      el("ipStudyExit").addEventListener("click", e => { e.preventDefault(); closeStudyMode(); });
+    }
+    const p = el("ipStudyProg");
+    if (p) p.textContent = el("studyProgressText")?.textContent || "";
+    return bar;
+  }
+
+  function hide(id) { el(id)?.classList.add("ip-hidden"); }
+  function show(fn) { const e = fn(); e.classList.remove("ip-hidden"); return e; }
+
+  function syncChrome() {
+    if (!isPhone()) {
+      ["ipHomeBar", "ipTopBar", "ipStudyBar", "ipStudyFab"].forEach(hide);
+      document.body.classList.remove("ip-show-search");
+      return;
+    }
+    // 標記要收起嘅主頁區塊
+    els.todayTasksList?.closest(".section-card")?.classList.add("ip-hide-on-phone");
+    els.subjectDeckGrid?.closest(".section-card")?.querySelector(".section-title-row")?.classList.add("ip-hide-on-phone");
+
+    const inStudy = !!(studyState && studyState.active);
+
+    if (inStudy) {
+      ["ipHomeBar", "ipTopBar", "ipStudyFab"].forEach(hide);
+      show(ensureStudyBar);
+      return;
+    }
+    hide("ipStudyBar");
+
+    if (currentView === "home") { show(ensureHomeBar); hide("ipTopBar"); hide("ipStudyFab"); }
+    else {
+      hide("ipHomeBar");
+      show(ensureTopBar);
+      if (currentView === "notes") show(ensureFab); else hide("ipStudyFab");
+    }
+  }
+
+  /* ---------- wrap ---------- */
+  const baseRenderAll = window.renderAll;
+  window.renderAll = renderAll = async function () { const r = await baseRenderAll.apply(this, arguments); if (isPhone()) syncChrome(); return r; };
+
+  const baseSwitch = switchView;
+  switchView = function () { const r = baseSwitch.apply(this, arguments); if (isPhone()) document.body.classList.remove("ip-show-search"); syncChrome(); return r; };
+
+  const baseClose = window.closeStudyMode;
+  window.closeStudyMode = closeStudyMode = function () {
+    try { if (typeof playSound === "function") playSound("notify"); } catch (e) {}
+    const r = baseClose.apply(this, arguments); syncChrome(); return r;
+  };
+
+  const baseRenderStudy = window.renderStudyMode;
+  window.renderStudyMode = renderStudyMode = async function () {
+    if (isPhone() && studyState?.active && studyState.preferences && studyState.preferences.viewMode !== "flip") {
+      studyState.preferences.viewMode = "flip"; studyState.answerVisible = false;
+    }
+    const r = await baseRenderStudy.apply(this, arguments);
+    if (isPhone()) syncChrome();
+    return r;
+  };
+
+  setBody();
+  mq.addEventListener ? mq.addEventListener("change", setBody) : mq.addListener(setBody);
+  window.addEventListener("orientationchange", () => setTimeout(setBody, 80));
+})();
