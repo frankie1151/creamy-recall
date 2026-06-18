@@ -3823,3 +3823,175 @@ body.iphone-mode .study-nav-row .mini-btn { flex: 1; min-height: 44px; justify-c
 
 /* ---- 首頁:收起「今日任務」(Safari 15.4+ :has) ---- */
 body.iphone-mode .section-card:has(#todayTasksList) { display: none !important; }
+/* =========================================================
+   iPhone 全重做樣式
+   ========================================================= */
+
+/* 注入元件預設收起 */
+#ipHomeBar, #ipTopBar, #ipStudyBar, #ipStudyFab, #ipMiniMenu { display: none; }
+.ip-hidden { display: none !important; }
+
+body.iphone-mode { overflow-x: hidden; }
+
+/* ---- 通用頂欄 ---- */
+body.iphone-mode .ip-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 80;
+  height: calc(54px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 12px 0;
+  display: flex; align-items: center; gap: 10px;
+  background: color-mix(in srgb, var(--bg-soft) 90%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+body.iphone-mode .ip-bar.ip-hidden { display: none !important; }
+.ip-bar-btn {
+  width: 42px; height: 42px; border-radius: 999px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--card-strong); border: 1px solid var(--line);
+  color: var(--text); box-shadow: var(--shadow-soft);
+}
+.ip-bar-btn:active { opacity: .7; }
+.ip-bar-right { margin-left: auto; }
+.ip-bar-cloud { color: var(--muted); font-weight: 700; font-size: 13px; }
+.ip-bar-title { flex: 1; min-width: 0; font-weight: 800; font-size: 19px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ipStudyExit { display: inline-flex; align-items: center; gap: 2px; font-weight: 800; font-size: 16px; color: var(--text); }
+#ipStudyExit:active { opacity: .7; }
+
+/* ---- 隱藏整個側欄 + 分頁 header ---- */
+body.iphone-mode .sidebar { display: none !important; }
+body.iphone-mode .app-shell { display: block !important; padding: 0 !important; }
+body.iphone-mode .main-panel { padding: calc(58px + env(safe-area-inset-top)) 14px 110px !important; }
+body.iphone-mode .page-header { display: none !important; }
+body.iphone-mode #homeView .stats-grid { display: none !important; }
+body.iphone-mode .ip-hide-on-phone { display: none !important; }
+
+/* deck 區塊去殼 */
+body.iphone-mode #homeView .section-card {
+  background: transparent !important; border: 0 !important; box-shadow: none !important; padding: 0 !important;
+}
+
+/* ---- 主頁 deck 格(圖一) ---- */
+body.iphone-mode #subjectDeckGrid {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 20px 14px !important;
+}
+body.iphone-mode .ip-deck-wrap { display: block; }
+body.iphone-mode .ip-deck {
+  position: relative; width: 100%; aspect-ratio: 16 / 10;
+  border: 0; border-radius: 22px; display: block; padding: 0;
+  background: linear-gradient(155deg,
+    color-mix(in srgb, var(--deck-color) 72%, white),
+    color-mix(in srgb, var(--deck-color) 100%, black 8%));
+  box-shadow: 0 10px 22px rgba(0,0,0,.10);
+}
+body.iphone-mode .ip-deck:active { transform: scale(.98); }
+body.iphone-mode .ip-deck-count {
+  position: absolute; top: 14px; right: 15px; color: #fff;
+  font-weight: 800; font-size: 23px; display: inline-flex; align-items: center; gap: 6px;
+  text-shadow: 0 1px 3px rgba(0,0,0,.14);
+}
+body.iphone-mode .ip-deck-due {
+  position: absolute; left: 13px; bottom: 13px;
+  background: #fff; color: #1f1f1f; font-weight: 800; font-size: 17px;
+  padding: 7px 15px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 6px;
+  box-shadow: 0 3px 9px rgba(0,0,0,.14);
+}
+body.iphone-mode .ip-deck-more {
+  position: absolute; right: 12px; bottom: 12px;
+  width: 40px; height: 40px; border-radius: 999px;
+  background: rgba(255,255,255,.22); border: 1.5px solid rgba(255,255,255,.6);
+  color: #fff; font-size: 24px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+body.iphone-mode .ip-deck-name {
+  text-align: center; margin-top: 9px; font-weight: 700; font-size: 16px; color: var(--text);
+}
+
+/* ---- + 小選單 ---- */
+body.iphone-mode #ipMiniMenu {
+  position: fixed; z-index: 130; gap: 4px; min-width: 170px; padding: 8px;
+  border-radius: 16px; background: var(--card-strong); border: 1px solid var(--line);
+  box-shadow: 0 18px 50px rgba(0,0,0,.2);
+}
+#ipMiniMenu button { text-align: left; padding: 13px 14px; border-radius: 11px; font-weight: 700; color: var(--text); background: transparent; }
+#ipMiniMenu button:active { background: color-mix(in srgb, var(--accent-strong) 70%, var(--card-strong)); }
+
+/* ---- deck 牆(圖六):收起 filter / 重複 header ---- */
+body.iphone-mode #notesView #subjectWallHeader,
+body.iphone-mode #notesView .filters-grid,
+body.iphone-mode #notesView .section-title-row { display: none !important; }
+body.iphone-mode.ip-show-search #notesView .filters-grid { display: grid !important; }
+body.iphone-mode #notesView .section-card { background: transparent; border: 0; box-shadow: none; padding: 0; }
+
+body.iphone-mode #notesList {
+  display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 14px !important;
+}
+body.iphone-mode .wall-card {
+  min-height: 218px; border-radius: 18px; padding: 14px;
+  background: var(--card-strong); box-shadow: var(--shadow-soft);
+}
+body.iphone-mode .wall-card .wall-title { font-size: 19px; line-height: 1.45; text-align: center; }
+
+/* 開始複習 FAB */
+body.iphone-mode #ipStudyFab {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 78;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 15px 28px; border: 0; border-radius: 999px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+  color: #fff; font-weight: 800; font-size: 16px;
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--primary-strong) 38%, transparent);
+}
+body.iphone-mode #ipStudyFab:active { transform: translateX(-50%) scale(.97); }
+
+/* ---- 沉浸翻卡(圖二三) ---- */
+body.iphone-mode .study-mode { padding: 0 !important; }
+body.iphone-mode .study-shell,
+body.iphone-mode .study-shell.study-with-rail {
+  width: 100% !important; grid-template-columns: 1fr !important; gap: 0 !important; padding: 0 !important;
+}
+body.iphone-mode #studyPreviewRail,
+body.iphone-mode #studyRailResizer,
+body.iphone-mode #studySplitResizer,
+body.iphone-mode #studyCardSplit,
+body.iphone-mode .study-topbar,
+body.iphone-mode .study-progress-wrap,
+body.iphone-mode .study-inline-editbar,
+body.iphone-mode .study-meta-row,
+body.iphone-mode #studyMissedPointZone,
+body.iphone-mode #studyQuickMetaBar,
+body.iphone-mode .study-quick-meta-v2,
+body.iphone-mode #studyEditBtn,
+body.iphone-mode #toggleStudyLayoutBtn { display: none !important; }
+
+body.iphone-mode #studyStage {
+  padding: calc(64px + env(safe-area-inset-top)) 12px 180px !important;
+  grid-column: 1 !important;
+}
+body.iphone-mode #studyCompleteState {
+  padding-top: calc(74px + env(safe-area-inset-top)) !important; grid-column: 1 !important;
+}
+body.iphone-mode #studyCardFlip { margin: 0 !important; }
+body.iphone-mode .study-card-inner { height: calc(100dvh - 280px) !important; min-height: 0 !important; }
+body.iphone-mode .study-face { border-radius: 20px; padding: 18px; }
+body.iphone-mode .study-content {
+  font-size: 21px; line-height: 1.7;
+  display: flex; flex-direction: column; justify-content: safe center;
+}
+
+/* 底部評分固定貼底 */
+body.iphone-mode .study-bottom-layout {
+  display: block !important;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 76;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom)) !important;
+  background: color-mix(in srgb, var(--bg-soft) 94%, transparent);
+  backdrop-filter: blur(12px); border-top: 1px solid var(--line);
+}
+body.iphone-mode .study-bottom-controls { display: grid !important; gap: 8px !important; }
+body.iphone-mode .study-actions { display: flex !important; flex-wrap: wrap; gap: 7px !important; width: 100% !important; }
+body.iphone-mode .study-actions .mini-btn { flex: 1 1 30%; min-height: 48px; padding: 8px 4px; justify-content: center; }
+body.iphone-mode .study-nav-row { display: flex !important; gap: 8px !important; width: 100% !important; }
+body.iphone-mode .study-nav-row .mini-btn { flex: 1; min-height: 44px; justify-content: center; }
