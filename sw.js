@@ -9,7 +9,7 @@
   卡片資料不會儲存在這裡。
 */
 
-const CACHE_NAME = "creamy-recall-cache-v42";
+const CACHE_NAME = "creamy-recall-cache-v43";
 
 const APP_FILES = [
   "./",
