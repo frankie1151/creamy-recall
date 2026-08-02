@@ -11201,3 +11201,1273 @@ if ("serviceWorker" in navigator) {
   window.creamyMobileInteractionV1Repair =
     initMobileInteractionPatch;
 })();
+/* =========================================================
+   LIBRARY + MOBILE FINAL PATCH V2
+   - 長按不選字
+   - 點選單外關閉
+   - 圖片縮放保持
+   - Deck 卡片排序
+   - 搜尋自動清空
+   - Preview 搜尋恢復
+   - 錯題／常錯新定義
+   - 搜尋相關度排序
+   ========================================================= */
+
+(function () {
+  "use strict";
+
+  if (window.__creamyLibraryMobileFinalV2) return;
+  window.__creamyLibraryMobileFinalV2 = true;
+
+  const VALID_REVIEW_ACTIONS = new Set([
+    "forgot",
+    "okay",
+    "remembered",
+    "mastered"
+  ]);
+
+  /* =======================================================
+     1. 手機長按：禁止選取文字
+     ======================================================= */
+
+  const CONTEXT_TARGET_SELECTOR = [
+    "[data-context-deck]",
+    "[data-context-note]",
+    "[data-study-preview-note]"
+  ].join(",");
+
+  function isTouchDeviceV2() {
+    return window.matchMedia("(pointer: coarse)").matches;
+  }
+
+  document.addEventListener(
+    "selectstart",
+    event => {
+      if (!isTouchDeviceV2()) return;
+
+      if (event.target.closest(CONTEXT_TARGET_SELECTOR)) {
+        event.preventDefault();
+      }
+    },
+    true
+  );
+
+  document.addEventListener(
+    "dragstart",
+    event => {
+      if (!isTouchDeviceV2()) return;
+
+      if (event.target.closest(CONTEXT_TARGET_SELECTOR)) {
+        event.preventDefault();
+      }
+    },
+    true
+  );
+
+  /*
+    攔截手機原生長按選單。
+    自己的 contextmenu 選單仍可正常使用。
+  */
+  document.addEventListener(
+    "contextmenu",
+    event => {
+      if (!isTouchDeviceV2()) return;
+
+      const target = event.target.closest(
+        CONTEXT_TARGET_SELECTOR
+      );
+
+      if (!target) return;
+
+      event.preventDefault();
+    },
+    false
+  );
+
+  /* =======================================================
+     2. 點選單外任何位置，自動關閉
+     ======================================================= */
+
+  function closeAllContextMenusV2() {
+    if (typeof hideContextMenuFinal === "function") {
+      hideContextMenuFinal();
+    }
+
+    const normalMenu =
+      document.getElementById("contextMenu");
+
+    if (normalMenu) {
+      normalMenu.classList.remove("active");
+    }
+
+    const missedMenu =
+      document.getElementById("missedPointContextMenu");
+
+    if (missedMenu) {
+      missedMenu.classList.add("hidden");
+      missedMenu.style.display = "none";
+    }
+  }
+
+  /*
+    使用 pointerdown capture。
+    即使後面的舊 click handler 把點擊吞掉，
+    這裡仍可先關閉選單。
+  */
+  document.addEventListener(
+    "pointerdown",
+    event => {
+      const menu =
+        document.getElementById("contextMenu");
+
+      const missedMenu =
+        document.getElementById(
+          "missedPointContextMenu"
+        );
+
+      const normalOpen =
+        menu?.classList.contains("active");
+
+      const missedOpen =
+        missedMenu &&
+        !missedMenu.classList.contains("hidden") &&
+        missedMenu.style.display !== "none";
+
+      if (!normalOpen && !missedOpen) return;
+
+      if (
+        event.target.closest(
+          "#contextMenu, #missedPointContextMenu"
+        )
+      ) {
+        return;
+      }
+
+      closeAllContextMenusV2();
+    },
+    true
+  );
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      closeAllContextMenusV2();
+    }
+  });
+
+  /* =======================================================
+     3. 圖片縮放後保持，不讓舊 pointerup 關閉 Lightbox
+     ======================================================= */
+
+  let imagePinchGuardUntil = 0;
+  let forceLightboxClose = false;
+
+  const lightbox =
+    document.getElementById("lightboxModal");
+
+  const lightboxImage =
+    document.getElementById("lightboxImage");
+
+  function getInlineImageScaleV2() {
+    if (!lightboxImage) return 1;
+
+    const transform =
+      lightboxImage.style.transform || "";
+
+    const match = transform.match(
+      /scale\(([\d.]+)\)/
+    );
+
+    return match
+      ? Math.max(1, Number(match[1]) || 1)
+      : 1;
+  }
+
+  if (lightbox) {
+    /*
+      雙指開始後，暫時禁止舊程式把 Lightbox 關閉。
+    */
+    lightbox.addEventListener(
+      "touchstart",
+      event => {
+        if (event.touches.length >= 2) {
+          imagePinchGuardUntil =
+            Date.now() + 10000;
+
+          lightbox.classList.add(
+            "lightbox-pinching"
+          );
+        }
+      },
+      {
+        passive: true,
+        capture: true
+      }
+    );
+
+    lightbox.addEventListener(
+      "touchend",
+      event => {
+        if (event.touches.length < 2) {
+          imagePinchGuardUntil =
+            Date.now() + 800;
+        }
+
+        if (event.touches.length === 0) {
+          lightbox.classList.remove(
+            "lightbox-pinching"
+          );
+
+          if (getInlineImageScaleV2() > 1.01) {
+            lightbox.classList.add(
+              "lightbox-zoomed"
+            );
+          } else {
+            lightbox.classList.remove(
+              "lightbox-zoomed"
+            );
+          }
+        }
+      },
+      {
+        passive: true,
+        capture: true
+      }
+    );
+
+    lightbox.addEventListener(
+      "touchcancel",
+      () => {
+        imagePinchGuardUntil =
+          Date.now() + 800;
+
+        lightbox.classList.remove(
+          "lightbox-pinching"
+        );
+      },
+      {
+        passive: true,
+        capture: true
+      }
+    );
+  }
+
+  /*
+    右上角 X 永遠可以關閉。
+  */
+  document.addEventListener(
+    "pointerdown",
+    event => {
+      if (
+        event.target.closest("#lightboxCloseBtn")
+      ) {
+        forceLightboxClose = true;
+      }
+    },
+    true
+  );
+
+  if (typeof closeLightbox === "function") {
+    const baseCloseLightboxV2 = closeLightbox;
+
+    window.closeLightbox =
+      closeLightbox =
+      function (...args) {
+        if (
+          !forceLightboxClose &&
+          Date.now() < imagePinchGuardUntil
+        ) {
+          return;
+        }
+
+        forceLightboxClose = false;
+        imagePinchGuardUntil = 0;
+
+        lightbox?.classList.remove(
+          "lightbox-pinching",
+          "lightbox-zoomed"
+        );
+
+        return baseCloseLightboxV2.apply(
+          this,
+          args
+        );
+      };
+  }
+
+  /* =======================================================
+     4. 錯題／常錯新定義
+     ======================================================= */
+
+  function getValidReviewHistoryV2(note) {
+    return (note?.reviewHistory || [])
+      .filter(item =>
+        VALID_REVIEW_ACTIONS.has(item?.action)
+      );
+  }
+
+  function getRecentReviewHistoryV2(
+    note,
+    limit = 10
+  ) {
+    return getValidReviewHistoryV2(note)
+      .slice(-limit);
+  }
+
+  function getForgotCountV2(note) {
+    const history =
+      getValidReviewHistoryV2(note);
+
+    const historyCount = history.filter(
+      item => item.action === "forgot"
+    ).length;
+
+    return Math.max(
+      historyCount,
+      Number(note?.wrongCount || 0),
+      Number(note?.lapseCount || 0)
+    );
+  }
+
+  /*
+    錯題：
+    最近一次有效評分是「忘了」。
+    之後答對便不再一直顯示為錯題。
+  */
+  function isWrongCardV2(note) {
+    const history =
+      getValidReviewHistoryV2(note);
+
+    if (history.length) {
+      return (
+        history[history.length - 1].action ===
+        "forgot"
+      );
+    }
+
+    return note?.lastReviewResult === "forgot";
+  }
+
+  /*
+    常錯：
+    最近 10 次有效複習中：
+    - 至少有 4 次紀錄
+    - 忘了至少 3 次
+    - 忘記率至少 40%
+  */
+  function isFrequentWrongCardV2(note) {
+    const recent =
+      getRecentReviewHistoryV2(note, 10);
+
+    if (recent.length >= 4) {
+      const forgot = recent.filter(
+        item => item.action === "forgot"
+      ).length;
+
+      return (
+        forgot >= 3 &&
+        forgot / recent.length >= 0.4
+      );
+    }
+
+    /*
+      舊卡可能沒有完整 reviewHistory，
+      暫時用累積紀錄相容。
+    */
+    const reviewCount =
+      Number(note?.reviewCount || 0);
+
+    const forgotCount =
+      getForgotCountV2(note);
+
+    return (
+      reviewCount >= 4 &&
+      forgotCount >= 3 &&
+      forgotCount / reviewCount >= 0.4
+    );
+  }
+
+  window.isWrongCardV2 = isWrongCardV2;
+  window.isFrequentWrongCardV2 =
+    isFrequentWrongCardV2;
+
+  window.getStudyState =
+    getStudyState =
+    function (note) {
+      const today = todayStr();
+
+      if (note.mastered) return "mastered";
+
+      if (
+        isWrongCardV2(note) &&
+        note.nextReviewDate <= today &&
+        note.lastCompletedDate !== today
+      ) {
+        return "wrong";
+      }
+
+      if (
+        Number(note.reviewStage || 0) === 0 &&
+        !note.lastCompletedDate
+      ) {
+        return "new";
+      }
+
+      if (
+        note.nextReviewDate <= today &&
+        note.lastCompletedDate !== today
+      ) {
+        return "due";
+      }
+
+      return "normal";
+    };
+
+  window.getStudyStateLabel =
+    getStudyStateLabel =
+    function (note) {
+      const state = getStudyState(note);
+
+      if (state === "mastered") return "已熟記";
+      if (state === "new") return "新卡";
+      if (state === "due") return "未複習";
+      if (state === "wrong") return "錯題";
+
+      return "學習中";
+    };
+
+  /* =======================================================
+     5. 搜尋相關度
+     ======================================================= */
+
+  function normalizeSearchTextV2(text) {
+    return String(text || "")
+      .normalize("NFKC")
+      .toLocaleLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function getNoteSearchPartsV2(note) {
+    return {
+      question: normalizeSearchTextV2(
+        stripHtml(
+          note.questionHtml || note.question || ""
+        )
+      ),
+
+      answer: normalizeSearchTextV2(
+        stripHtml(
+          note.answerHtml || note.answer || ""
+        )
+      ),
+
+      notes: normalizeSearchTextV2(
+        note.notes || ""
+      ),
+
+      deck: normalizeSearchTextV2(
+        getDeckName(note.deckId)
+      )
+    };
+  }
+
+  function fieldSearchScoreV2(
+    text,
+    query,
+    exactScore,
+    startScore,
+    includeScore
+  ) {
+    if (!text || !query) return 0;
+
+    if (text === query) return exactScore;
+
+    if (text.startsWith(query)) {
+      return startScore;
+    }
+
+    if (text.includes(query)) {
+      return includeScore;
+    }
+
+    return 0;
+  }
+
+  function getSearchRelevanceV2(note, query) {
+    const q = normalizeSearchTextV2(query);
+
+    if (!q) return 0;
+
+    const parts = getNoteSearchPartsV2(note);
+
+    let score = 0;
+
+    score += fieldSearchScoreV2(
+      parts.question,
+      q,
+      10000,
+      8500,
+      6500
+    );
+
+    score += fieldSearchScoreV2(
+      parts.answer,
+      q,
+      6000,
+      5200,
+      4200
+    );
+
+    score += fieldSearchScoreV2(
+      parts.notes,
+      q,
+      3600,
+      3100,
+      2600
+    );
+
+    score += fieldSearchScoreV2(
+      parts.deck,
+      q,
+      2200,
+      1800,
+      1400
+    );
+
+    /*
+      多字搜尋：
+      每個關鍵字都有小量加分。
+    */
+    const tokens = q
+      .split(" ")
+      .filter(Boolean);
+
+    tokens.forEach(token => {
+      if (parts.question.includes(token)) {
+        score += 160;
+      }
+
+      if (parts.answer.includes(token)) {
+        score += 100;
+      }
+
+      if (parts.notes.includes(token)) {
+        score += 60;
+      }
+
+      if (parts.deck.includes(token)) {
+        score += 30;
+      }
+    });
+
+    if (isFrequentWrongCardV2(note)) {
+      score += 25;
+    } else if (isWrongCardV2(note)) {
+      score += 15;
+    }
+
+    if (note.starred) score += 5;
+
+    return score;
+  }
+
+  /* =======================================================
+     6. 改良卡片篩選
+     ======================================================= */
+
+  window.getFilteredNotes =
+    getFilteredNotes =
+    function () {
+      const query =
+        normalizeSearchTextV2(
+          els.searchInput?.value || ""
+        );
+
+      const deckId =
+        currentDeckWall ||
+        els.filterDeck?.value ||
+        "";
+
+      const importance =
+        els.filterImportance?.value || "";
+
+      const difficulty =
+        els.filterDifficulty?.value || "";
+
+      const stateFilter =
+        els.filterStudyState?.value || "";
+
+      const starred =
+        els.filterStarred?.value || "";
+
+      return appState.notes.filter(note => {
+        const parts =
+          getNoteSearchPartsV2(note);
+
+        const haystack = [
+          parts.question,
+          parts.answer,
+          parts.notes,
+          parts.deck
+        ].join(" ");
+
+        const tokens =
+          query.split(" ").filter(Boolean);
+
+        if (
+          query &&
+          !tokens.every(token =>
+            haystack.includes(token)
+          )
+        ) {
+          return false;
+        }
+
+        if (
+          deckId &&
+          note.deckId !== deckId
+        ) {
+          return false;
+        }
+
+        if (
+          importance &&
+          note.importance !== importance
+        ) {
+          return false;
+        }
+
+        if (
+          difficulty &&
+          note.difficulty !== difficulty
+        ) {
+          return false;
+        }
+
+        if (
+          stateFilter === "wrong" &&
+          !isWrongCardV2(note)
+        ) {
+          return false;
+        }
+
+        if (
+          stateFilter === "frequent" &&
+          !isFrequentWrongCardV2(note)
+        ) {
+          return false;
+        }
+
+        if (
+          stateFilter &&
+          !["wrong", "frequent"].includes(
+            stateFilter
+          ) &&
+          getStudyState(note) !== stateFilter
+        ) {
+          return false;
+        }
+
+        if (
+          starred === "starred" &&
+          !note.starred
+        ) {
+          return false;
+        }
+
+        if (
+          starred === "unstarred" &&
+          note.starred
+        ) {
+          return false;
+        }
+
+        return true;
+      });
+    };
+
+  /* =======================================================
+     7. Deck 內卡片排序
+     ======================================================= */
+
+  function dateValueV2(value) {
+    const time = Date.parse(value || "");
+
+    return Number.isFinite(time) ? time : 0;
+  }
+
+  function fallbackUpdatedSortV2(a, b) {
+    return (
+      dateValueV2(b.updatedAt) -
+      dateValueV2(a.updatedAt)
+    );
+  }
+
+  function getLibrarySortModeV2() {
+    return (
+      document.getElementById(
+        "notesSortInput"
+      )?.value ||
+      appState.settings?.cardLibrarySort ||
+      "relevance"
+    );
+  }
+
+  function sortLibraryNotesV2(notes) {
+    const list = [...notes];
+
+    const mode = getLibrarySortModeV2();
+
+    const query =
+      els.searchInput?.value || "";
+
+    if (mode === "stage-asc") {
+      return list.sort((a, b) =>
+        Number(a.reviewStage || 0) -
+          Number(b.reviewStage || 0) ||
+        fallbackUpdatedSortV2(a, b)
+      );
+    }
+
+    if (mode === "stage-desc") {
+      return list.sort((a, b) =>
+        Number(b.reviewStage || 0) -
+          Number(a.reviewStage || 0) ||
+        fallbackUpdatedSortV2(a, b)
+      );
+    }
+
+    if (mode === "newest") {
+      return list.sort((a, b) =>
+        dateValueV2(b.createdAt) -
+        dateValueV2(a.createdAt)
+      );
+    }
+
+    if (mode === "oldest") {
+      return list.sort((a, b) =>
+        dateValueV2(a.createdAt) -
+        dateValueV2(b.createdAt)
+      );
+    }
+
+    if (mode === "forgot-desc") {
+      return list.sort((a, b) =>
+        getForgotCountV2(b) -
+          getForgotCountV2(a) ||
+        fallbackUpdatedSortV2(a, b)
+      );
+    }
+
+    if (mode === "frequent-first") {
+      return list.sort((a, b) =>
+        Number(isFrequentWrongCardV2(b)) -
+          Number(isFrequentWrongCardV2(a)) ||
+        Number(isWrongCardV2(b)) -
+          Number(isWrongCardV2(a)) ||
+        getForgotCountV2(b) -
+          getForgotCountV2(a) ||
+        fallbackUpdatedSortV2(a, b)
+      );
+    }
+
+    if (mode === "due-first") {
+      return list.sort((a, b) =>
+        String(a.nextReviewDate || "")
+          .localeCompare(
+            String(b.nextReviewDate || "")
+          ) ||
+        fallbackUpdatedSortV2(a, b)
+      );
+    }
+
+    if (mode === "updated") {
+      return list.sort(
+        fallbackUpdatedSortV2
+      );
+    }
+
+    /*
+      預設：
+      有搜尋字時按相關度，
+      沒有搜尋字時按最近更新。
+    */
+    const normalizedQuery =
+      normalizeSearchTextV2(query);
+
+    if (normalizedQuery) {
+      return list.sort((a, b) =>
+        getSearchRelevanceV2(
+          b,
+          normalizedQuery
+        ) -
+          getSearchRelevanceV2(
+            a,
+            normalizedQuery
+          ) ||
+        fallbackUpdatedSortV2(a, b)
+      );
+    }
+
+    return list.sort(
+      fallbackUpdatedSortV2
+    );
+  }
+
+  window.sortLibraryNotesV2 =
+    sortLibraryNotesV2;
+
+  function ensureNotesSortInputV2() {
+    const filters =
+      document.querySelector(
+        "#notesView .filters-grid"
+      );
+
+    if (
+      !filters ||
+      document.getElementById(
+        "notesSortInput"
+      )
+    ) {
+      return;
+    }
+
+    const field =
+      document.createElement("div");
+
+    field.className =
+      "field notes-sort-field";
+
+    field.innerHTML = `
+      <label>排序</label>
+
+      <select id="notesSortInput">
+        <option value="relevance">
+          搜尋相關度／最近更新
+        </option>
+
+        <option value="stage-asc">
+          階段：新卡至高階
+        </option>
+
+        <option value="stage-desc">
+          階段：高階至新卡
+        </option>
+
+        <option value="newest">
+          最新加入
+        </option>
+
+        <option value="oldest">
+          最早加入
+        </option>
+
+        <option value="forgot-desc">
+          忘了次數最多
+        </option>
+
+        <option value="frequent-first">
+          常錯優先
+        </option>
+
+        <option value="due-first">
+          複習日期最早
+        </option>
+
+        <option value="updated">
+          最近修改
+        </option>
+      </select>
+    `;
+
+    filters.appendChild(field);
+
+    const select =
+      field.querySelector("select");
+
+    select.value =
+      appState.settings?.cardLibrarySort ||
+      "relevance";
+
+    select.addEventListener(
+      "change",
+      () => {
+        appState.settings.cardLibrarySort =
+          select.value;
+
+        requestSave("卡片排序已更新");
+        renderNotes();
+      }
+    );
+  }
+
+  /*
+    保留現有卡片外觀，只改 DOM 顯示順序。
+  */
+  const baseRenderNotesV2 = renderNotes;
+
+  window.renderNotes =
+    renderNotes =
+    function (...args) {
+      ensureNotesSortInputV2();
+
+      const result =
+        baseRenderNotesV2.apply(this, args);
+
+      const list =
+        document.getElementById("notesList");
+
+      if (!list) return result;
+
+      const cards = new Map(
+        [...list.querySelectorAll(
+          "[data-context-note]"
+        )].map(card => [
+          String(card.dataset.contextNote),
+          card
+        ])
+      );
+
+      const sorted =
+        sortLibraryNotesV2(
+          getFilteredNotes()
+        );
+
+      sorted.forEach(note => {
+        const card = cards.get(
+          String(note.id)
+        );
+
+        if (card) list.appendChild(card);
+      });
+
+      return result;
+    };
+
+  /* =======================================================
+     8. 重新進入卡片庫／Deck 時清空搜尋
+     ======================================================= */
+
+  function clearLibrarySearchV2() {
+    if (!els.searchInput) return;
+
+    els.searchInput.value = "";
+  }
+
+  const baseSwitchViewV2 = switchView;
+
+  window.switchView =
+    switchView =
+    function (view, ...args) {
+      const enteringLibrary =
+        view === "notes" &&
+        currentView !== "notes";
+
+      if (enteringLibrary) {
+        clearLibrarySearchV2();
+      }
+
+      const result =
+        baseSwitchViewV2.call(
+          this,
+          view,
+          ...args
+        );
+
+      if (enteringLibrary) {
+        renderNotes();
+      }
+
+      return result;
+    };
+
+  const baseOpenDeckWallV2 =
+    window.openDeckWall || openDeckWall;
+
+  window.openDeckWall =
+    openDeckWall =
+    function (deckId, ...args) {
+      clearLibrarySearchV2();
+
+      return baseOpenDeckWallV2.call(
+        this,
+        deckId,
+        ...args
+      );
+    };
+
+  const baseClearDeckWallV2 =
+    window.clearDeckWall || clearDeckWall;
+
+  window.clearDeckWall =
+    clearDeckWall =
+    function (...args) {
+      clearLibrarySearchV2();
+
+      return baseClearDeckWallV2.apply(
+        this,
+        args
+      );
+    };
+
+  /* =======================================================
+     9. Preview 搜尋刪字後恢復
+     ======================================================= */
+
+  function getPreviewBaseNotesV2() {
+    if (!studyState?.active) return [];
+
+    let notes =
+      creamyFinalPreviewState.scope === "all"
+        ? [...appState.notes]
+        : [...(studyState.notes || [])];
+
+    const seen = new Set();
+
+    notes = notes.filter(note => {
+      if (!note?.id) return false;
+
+      const id = String(note.id);
+
+      if (seen.has(id)) return false;
+
+      seen.add(id);
+      return true;
+    });
+
+    if (
+      creamyFinalPreviewState.scope === "all"
+    ) {
+      const deckOrder =
+        typeof getSubjectDeckOrderFinal ===
+        "function"
+          ? getSubjectDeckOrderFinal().map(
+              deck => deck.id
+            )
+          : appState.decks.map(
+              deck => deck.id
+            );
+
+      notes.sort((a, b) => {
+        const deckDifference =
+          deckOrder.indexOf(a.deckId) -
+          deckOrder.indexOf(b.deckId);
+
+        return (
+          deckDifference ||
+          fallbackUpdatedSortV2(a, b)
+        );
+      });
+    }
+
+    return notes;
+  }
+
+  function previewCardHtmlV2(note) {
+    const deck = getDeck(note.deckId);
+
+    const question =
+      getPlainPreviewFromHtml(
+        note.questionHtml,
+        120
+      );
+
+    const queueIndex =
+      typeof getStudyQueueIndexByNoteIdFinal ===
+      "function"
+        ? getStudyQueueIndexByNoteIdFinal(
+            note.id
+          )
+        : -1;
+
+    const activeId =
+      String(
+        studyState.notes?.[
+          studyState.index
+        ]?.id || ""
+      );
+
+    const active =
+      String(note.id) === activeId
+        ? "active"
+        : "";
+
+    const fromAll =
+      queueIndex === -1
+        ? "from-all-decks"
+        : "";
+
+    const fit =
+      typeof getStudyPreviewFitClassFinal ===
+      "function"
+        ? getStudyPreviewFitClassFinal(
+            question
+          )
+        : "";
+
+    return `
+      <button
+        type="button"
+        class="study-preview-card ${active} ${fromAll} ${fit}"
+        data-study-preview-note="${escapeAttr(note.id)}"
+        title="切換到這張卡片"
+      >
+        <div class="study-preview-top">
+          <span
+            class="study-preview-dot"
+            style="--dot-color:${escapeAttr(deck.color)}"
+          ></span>
+
+          <span>${escapeHtml(deck.name)}</span>
+        </div>
+
+        <div class="study-preview-q">
+          ${escapeHtml(question || "無文字問題")}
+        </div>
+
+        <div class="study-preview-meta">
+          <span class="study-preview-pill">
+            ${escapeHtml(getStudyStateLabel(note))}
+          </span>
+
+          <span class="study-preview-pill">
+            ${escapeHtml(
+              getCurveStageLabel(
+                note.reviewStage
+              )
+            )}
+          </span>
+
+          ${
+            queueIndex === -1
+              ? `<span class="study-preview-pill extra">可加入</span>`
+              : ""
+          }
+        </div>
+      </button>
+    `;
+  }
+
+  function rebuildPreviewListV2() {
+    const list =
+      document.getElementById(
+        "studyPreviewList"
+      );
+
+    if (!list || !studyState?.active) {
+      return;
+    }
+
+    const query =
+      creamyFinalPreviewState.query || "";
+
+    const notes =
+      getPreviewBaseNotesV2()
+        .filter(note =>
+          typeof noteMatchesStudyPreviewSearchFinal ===
+          "function"
+            ? noteMatchesStudyPreviewSearchFinal(
+                note,
+                query
+              )
+            : true
+        );
+
+    list.innerHTML = notes.length
+      ? notes.map(previewCardHtmlV2).join("")
+      : `<div class="study-preview-empty">沒有符合搜尋的卡片</div>`;
+  }
+
+  let previewRefreshFrame = 0;
+
+  function schedulePreviewRefreshV2() {
+    cancelAnimationFrame(
+      previewRefreshFrame
+    );
+
+    previewRefreshFrame =
+      requestAnimationFrame(
+        rebuildPreviewListV2
+      );
+  }
+
+  document.addEventListener(
+    "input",
+    event => {
+      const input =
+        event.target.closest(
+          "#studyPreviewSearchInput"
+        );
+
+      if (!input) return;
+
+      creamyFinalPreviewState.query =
+        input.value || "";
+
+      if (!event.isComposing) {
+        schedulePreviewRefreshV2();
+      }
+    },
+    true
+  );
+
+  document.addEventListener(
+    "compositionend",
+    event => {
+      if (
+        !event.target.closest(
+          "#studyPreviewSearchInput"
+        )
+      ) {
+        return;
+      }
+
+      creamyFinalPreviewState.query =
+        event.target.value || "";
+
+      schedulePreviewRefreshV2();
+    },
+    true
+  );
+
+  document.addEventListener(
+    "change",
+    event => {
+      if (
+        event.target.closest(
+          "#studyPreviewTargetSelect, #studyPreviewScopeSelect"
+        )
+      ) {
+        setTimeout(
+          schedulePreviewRefreshV2,
+          0
+        );
+      }
+    },
+    true
+  );
+
+  /* =======================================================
+     Init
+     ======================================================= */
+
+  function initLibraryMobileFinalV2() {
+    ensureNotesSortInputV2();
+
+    if (currentView === "notes") {
+      renderNotes();
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      initLibraryMobileFinalV2
+    );
+  } else {
+    initLibraryMobileFinalV2();
+  }
+
+  window.creamyLibraryMobileFinalV2Repair =
+    initLibraryMobileFinalV2;
+})();
