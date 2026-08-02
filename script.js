@@ -187,11 +187,6 @@ function collectEls() {
     todayMonthBtn: document.getElementById("todayMonthBtn"),
     selectedDateLabel: document.getElementById("selectedDateLabel"),
     selectedDateTasks: document.getElementById("selectedDateTasks"),
-    cakeEmoji: document.getElementById("cakeEmoji"),
-    cakeTitle: document.getElementById("cakeTitle"),
-    cakeSub: document.getElementById("cakeSub"),
-    cakeProgress: document.getElementById("cakeProgress"),
-    cakeMeta: document.getElementById("cakeMeta"),
 
     reviewList: document.getElementById("reviewList"),
     reviewToStudyBtn: document.getElementById("reviewToStudyBtn"),
@@ -203,8 +198,6 @@ function collectEls() {
     enableNotifyBtn: document.getElementById("enableNotifyBtn"),
     testSoundBtn: document.getElementById("testSoundBtn"),
     themeButtons: document.querySelectorAll(".theme-option"),
-    cakeKindInput: document.getElementById("cakeKindInput"),
-    cakeGoalInput: document.getElementById("cakeGoalInput"),
 
     exportBackupBtn: document.getElementById("exportBackupBtn"),
     importMergeBtn: document.getElementById("importMergeBtn"),
@@ -641,13 +634,11 @@ const decks = DEFAULT_DECKS.map((deck, index) => ({
     version: 20,
     decks,
     notes: [],
-    progress: {
-      streakDays: 0,
-      lastStudyDate: "",
-      reviewDates: {},
-      creamPoints: 0,
-      cakesCompleted: 0
-    },
+progress: {
+  streakDays: 0,
+  lastStudyDate: "",
+  reviewDates: {}
+},
     settings: {
       theme: "cream",
       reduceMotion: false,
@@ -656,8 +647,6 @@ const decks = DEFAULT_DECKS.map((deck, index) => ({
       soundVolume: 70,
       notificationsEnabled: false,
       splitRatio: 50,
-      cakeKind: "🍰",
-      cakeGoal: 30
     }
   };
 }
@@ -704,6 +693,15 @@ function normalizeAppState(raw) {
     progress: { ...base.progress, ...(raw.progress || {}) }
   };
 
+/*
+  舊版本曾經有 Cake 功能。
+  載入舊資料時清除已停用的 Cake 欄位。
+*/
+delete s.settings.cakeKind;
+delete s.settings.cakeGoal;
+delete s.progress.creamPoints;
+delete s.progress.cakesCompleted;
+	
   if (!Array.isArray(raw.decks)) {
     s.decks = base.decks;
   } else {
@@ -1410,8 +1408,6 @@ function renderSettings() {
   els.soundToggle.checked = !!appState.settings.soundEnabled;
   els.soundVolumeInput.value = Number(appState.settings.soundVolume ?? 70);
   els.reduceMotionToggle.checked = !!appState.settings.reduceMotion;
-  els.cakeKindInput.value = appState.settings.cakeKind || "🍰";
-  els.cakeGoalInput.value = appState.settings.cakeGoal || 30;
   applyTheme(appState.settings.theme || "cream");
 }
 
@@ -1691,7 +1687,6 @@ function renderCalendar() {
 
   els.calendarGrid.innerHTML = cells.join("");
   renderSelectedDateTasks();
-  renderCake();
 }
 
 function buildCalendarCell(dateObj, muted) {
@@ -1738,19 +1733,6 @@ function renderSelectedDateTasks() {
       </div>
     </div>
   `).join("");
-}
-
-function renderCake() {
-  const goal = Math.max(3, Number(appState.settings.cakeGoal || 30));
-  const points = appState.progress.creamPoints || 0;
-  const current = points % goal;
-  const percent = Math.min(100, Math.round((current / goal) * 100));
-
-  els.cakeEmoji.textContent = appState.settings.cakeKind || "🍰";
-  els.cakeTitle.textContent = `${appState.settings.cakeKind || "🍰"} 奶油進度`;
-  els.cakeSub.textContent = `${current} / ${goal}`;
-  els.cakeProgress.style.width = `${percent}%`;
-  els.cakeMeta.textContent = `已完成 ${appState.progress.cakesCompleted || 0} 個蛋糕 · 連續學習 ${appState.progress.streakDays || 0} 天`;
 }
 
 async function renderReviewList() {
@@ -2214,10 +2196,7 @@ function updateStudyProgress() {
   }
 
   appState.progress.reviewDates[today] = (appState.progress.reviewDates[today] || 0) + 1;
-  appState.progress.creamPoints = (appState.progress.creamPoints || 0) + 1;
 
-  const goal = Math.max(3, Number(appState.settings.cakeGoal || 30));
-  appState.progress.cakesCompleted = Math.floor(appState.progress.creamPoints / goal);
 }
 
 function applyReviewResultToNote(note, action, options = {}) {
@@ -3368,12 +3347,6 @@ function bindEvents() {
 
   els.testSoundBtn.addEventListener("click", () => playSound("mastered"));
   els.enableNotifyBtn.addEventListener("click", requestNotificationPermission);
-
-  els.cakeKindInput.addEventListener("change", () => {
-    appState.settings.cakeKind = els.cakeKindInput.value.trim() || "🍰";
-    requestSave("蛋糕設定已更新");
-    renderCake();
-  });
 
   els.cakeGoalInput.addEventListener("change", () => {
     appState.settings.cakeGoal = clamp(Number(els.cakeGoalInput.value || 30), 3, 365);
