@@ -172,6 +172,21 @@
             </div>
           </div>
 
+<div class="field">
+  <label>排序</label>
+  <select id="notesSortInput">
+    <option value="updated">最近修改</option>
+    <option value="relevance">搜尋相關度</option>
+    <option value="stage-asc">階段：新卡至高階</option>
+    <option value="stage-desc">階段：高階至新卡</option>
+    <option value="newest">最新加入</option>
+    <option value="oldest">最早加入</option>
+    <option value="forgot-desc">忘了次數最多</option>
+    <option value="frequent-first">常錯優先</option>
+    <option value="due-first">複習日期最早</option>
+  </select>
+</div>
+          
           <div id="notesList" class="notes-wall"></div>
         </section>
       </section>
@@ -796,6 +811,6 @@
 
   <div id="toastContainer" class="toast-container"></div>
 
-<script src="script.js?v=20260802-sortfix1"></script>
+<script src="script.js?v=20260802-sortrepair2"></script>
 </body>
 </html>
