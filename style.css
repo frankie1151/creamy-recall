@@ -280,8 +280,7 @@ a {
 .page-header h2,
 .section-title-row h3,
 .modal-head h3,
-.study-topbar h3,
-.cake-card h3 {
+.study-topbar h3 {
   margin: 0;
   font-family: var(--font-display);
 }
@@ -833,16 +832,8 @@ body[data-theme="night"] .study-chip {
 
 .calendar-extra-grid {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 1fr;
   gap: 18px;
-}
-
-.cake-card {
-  text-align: center;
-}
-
-.cake-emoji {
-  font-size: 64px;
 }
 
 .progress-shell,
