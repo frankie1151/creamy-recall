@@ -1404,10 +1404,32 @@ function applyTheme(theme) {
 }
 
 function renderSettings() {
-  els.defaultReminderInput.value = appState.settings.defaultReminderTime || "09:00";
-  els.soundToggle.checked = !!appState.settings.soundEnabled;
-  els.soundVolumeInput.value = Number(appState.settings.soundVolume ?? 70);
-  els.reduceMotionToggle.checked = !!appState.settings.reduceMotion;
+  els.defaultReminderInput.value =
+    appState.settings.defaultReminderTime || "09:00";
+
+  els.soundToggle.checked =
+    !!appState.settings.soundEnabled;
+
+  els.soundVolumeInput.value =
+    Number(appState.settings.soundVolume ?? 70);
+
+  els.reduceMotionToggle.checked =
+    !!appState.settings.reduceMotion;
+
+  /*
+    相容已移除 Cake HTML 的版本。
+    Cake 元件不存在時直接略過，不中斷整個程式。
+  */
+  if (els.cakeKindInput) {
+    els.cakeKindInput.value =
+      appState.settings.cakeKind || "🍰";
+  }
+
+  if (els.cakeGoalInput) {
+    els.cakeGoalInput.value =
+      appState.settings.cakeGoal || 30;
+  }
+
   applyTheme(appState.settings.theme || "cream");
 }
 
