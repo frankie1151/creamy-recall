@@ -14,7 +14,7 @@
 
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-<link rel="stylesheet" href="style.css?v=20260802-sortlayout1" />
+<link rel="stylesheet" href="style.css?v=20260802-sortlayout2" />
 </head>
 
 <body data-theme="cream">
@@ -161,18 +161,16 @@
                 <option value="frequent">常錯</option>
               </select>
             </div>
-
-            <div class="field">
-              <label>星號</label>
-              <select id="filterStarred">
-                <option value="">全部</option>
-                <option value="starred">只看標星</option>
-                <option value="unstarred">只看未標星</option>
-              </select>
-            </div>
-          </div>
-
 <div class="field">
+  <label>星號</label>
+  <select id="filterStarred">
+    <option value="">全部</option>
+    <option value="starred">只看標星</option>
+    <option value="unstarred">只看未標星</option>
+  </select>
+</div>
+
+<div class="field notes-sort-field">
   <label>排序</label>
   <select id="notesSortInput">
     <option value="updated">最近修改</option>
@@ -186,8 +184,10 @@
     <option value="due-first">複習日期最早</option>
   </select>
 </div>
-          
-          <div id="notesList" class="notes-wall"></div>
+
+</div>
+
+<div id="notesList" class="notes-wall"></div>
         </section>
       </section>
 
