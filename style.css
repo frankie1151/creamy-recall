@@ -4196,3 +4196,123 @@ body.iphone-mode .lightbox img {
     grid-template-columns: repeat(6, 34px);
   }
 }
+/* =========================================================
+   LIBRARY + MOBILE FINAL PATCH V2 CSS
+   ========================================================= */
+
+/* ---------- 長按不選取文字 ---------- */
+
+@media (pointer: coarse) {
+  [data-context-deck],
+  [data-context-deck] *,
+  [data-context-note],
+  [data-context-note] *,
+  [data-study-preview-note],
+  [data-study-preview-note] * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+  }
+
+  [data-context-deck],
+  [data-context-note],
+  [data-study-preview-note] {
+    touch-action: manipulation;
+  }
+
+  .mobile-long-press-active {
+    opacity: 0.72 !important;
+    transform: scale(0.985) !important;
+  }
+
+  .context-menu.active {
+    width: min(310px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: min(72vh, 560px) !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    z-index: 10000 !important;
+  }
+
+  .context-menu button,
+  .context-menu select {
+    min-height: 48px !important;
+    font-size: 16px !important;
+  }
+}
+
+/* ---------- 圖片只縮放圖片本身 ---------- */
+
+body.lightbox-open {
+  overflow: hidden !important;
+  touch-action: none !important;
+}
+
+.lightbox,
+body.iphone-mode .lightbox {
+  overflow: hidden !important;
+  touch-action: none !important;
+  overscroll-behavior: none !important;
+}
+
+.lightbox img,
+body.iphone-mode .lightbox img {
+  touch-action: none !important;
+  transform-origin: center center !important;
+  will-change: transform;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-user-drag: none !important;
+  max-width: 96vw !important;
+  max-height: 90vh !important;
+}
+
+/*
+  覆蓋舊版：
+  body.iphone-mode .lightbox {
+    touch-action: pinch-zoom;
+  }
+*/
+body.iphone-mode .lightbox,
+body.iphone-mode .lightbox img {
+  touch-action: none !important;
+}
+
+/* ---------- 卡片排序欄 ---------- */
+
+.notes-sort-field select {
+  min-width: 170px;
+}
+
+@media (min-width: 1201px) {
+  #notesView .filters-grid {
+    grid-template-columns:
+      repeat(7, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) and (pointer: coarse) {
+  body.iphone-mode.ip-show-search
+  #notesView .filters-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.iphone-mode
+  .notes-sort-field {
+    display: grid !important;
+  }
+}
+
+/* ---------- 錯題／常錯顏色 ---------- */
+
+.wall-state.wrong,
+.badge.wrong {
+  background: #ffe8e3;
+  border-color: #e8a59b;
+}
+
+.wall-state.frequent,
+.badge.frequent {
+  background: #ffdcd6;
+  border-color: #dd877c;
+}
