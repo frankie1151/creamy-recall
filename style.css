@@ -3955,3 +3955,244 @@ body[data-theme="night"] #ipRateBar button[data-r="remembered"] { background: #4
     overflow: auto !important;
   }
 }
+/* =========================================================
+   MOBILE INTERACTION + IMAGE ZOOM + COLOR PALETTE V1 CSS
+   ========================================================= */
+
+/* ---------- 手機長按回饋 ---------- */
+
+.mobile-long-press-active {
+  opacity: 0.72 !important;
+  transform: scale(0.985) !important;
+}
+
+@media (max-width: 767px) and (pointer: coarse) {
+  [data-context-deck],
+  [data-context-note] {
+    -webkit-touch-callout: none;
+  }
+
+  /*
+    手機右鍵選單置於畫面內，太長時可捲動。
+  */
+  .context-menu.active {
+    width: min(300px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: min(72vh, 560px) !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    z-index: 1000 !important;
+  }
+
+  .context-menu button,
+  .context-menu select {
+    min-height: 48px !important;
+    font-size: 16px !important;
+    touch-action: manipulation !important;
+  }
+}
+
+/* ---------- Question / Answer 正確接收觸控 ---------- */
+
+/*
+  正面顯示時：
+  答案背面不能攔截 Question 的捲動。
+*/
+.study-face-front {
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.study-face-back {
+  z-index: 1;
+  pointer-events: none;
+}
+
+/*
+  翻面後：
+  才把觸控交給答案。
+*/
+.study-card-inner.flipped .study-face-front {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.study-card-inner.flipped .study-face-back {
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.study-content,
+.flip-content,
+#studyQuestion,
+#studyAnswer {
+  overflow-y: auto !important;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 520px) and (pointer: coarse) {
+  body.iphone-mode .study-face {
+    overflow: hidden !important;
+    min-height: 0 !important;
+  }
+
+  body.iphone-mode .study-content {
+    display: block !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    touch-action: pan-y !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior: contain;
+    padding-bottom: 28px;
+  }
+}
+
+/* ---------- 圖片獨立縮放 ---------- */
+
+body.lightbox-open {
+  overflow: hidden !important;
+  touch-action: none !important;
+}
+
+.lightbox {
+  overflow: hidden !important;
+  touch-action: none !important;
+  overscroll-behavior: none !important;
+}
+
+.lightbox img,
+body.iphone-mode .lightbox img {
+  touch-action: none !important;
+  transform-origin: center center !important;
+  will-change: transform;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-user-drag: none;
+  max-width: 96vw !important;
+  max-height: 90vh !important;
+}
+
+/*
+  覆蓋舊版的 pinch-zoom。
+  不再把縮放交給整個瀏覽器頁面。
+*/
+body.iphone-mode .lightbox,
+body.iphone-mode .lightbox img {
+  touch-action: none !important;
+}
+
+/* ---------- 收納式文字顏色 ---------- */
+
+.compact-text-color {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.compact-text-color-toggle {
+  min-width: 48px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 3px;
+}
+
+.compact-color-a {
+  font-weight: 900;
+  text-decoration: underline;
+  text-decoration-color: #dc2626;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 3px;
+}
+
+.compact-color-arrow {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.compact-text-color-palette {
+  position: absolute;
+  z-index: 10000;
+  top: calc(100% + 8px);
+  right: 0;
+
+  width: 228px;
+  max-width: calc(100vw - 30px);
+
+  display: grid;
+  grid-template-columns: repeat(5, 34px);
+  justify-content: center;
+  gap: 8px;
+
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+
+  background: var(--card-strong);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(14px);
+}
+
+.compact-text-color-palette.hidden {
+  display: none !important;
+}
+
+.compact-text-color-swatch {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 999px;
+
+  background: var(--compact-text-color);
+  border: 2px solid
+    color-mix(in srgb, var(--line) 74%, white);
+
+  box-shadow:
+    0 2px 7px rgba(0, 0, 0, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.compact-text-color-swatch:hover,
+.compact-text-color-swatch:focus-visible {
+  transform: scale(1.12);
+  outline: 3px solid
+    color-mix(in srgb, var(--primary) 28%, transparent);
+  outline-offset: 2px;
+}
+
+/*
+  隱藏原本散開的文字色點。
+  螢光筆顏色仍然保留。
+*/
+.editor-toolbar > .text-color-dot[data-color] {
+  display: none !important;
+}
+
+/*
+  如果上一批已在學習工具列加入散開色點，
+  一併收納。
+*/
+#studyInlineEditBar
+  [data-study-text-colors] {
+  display: none !important;
+}
+
+@media (max-width: 520px) and (pointer: coarse) {
+  .compact-text-color-palette {
+    position: fixed;
+    left: 50%;
+    right: auto;
+    top: auto;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+
+    width: min(300px, calc(100vw - 24px));
+    grid-template-columns: repeat(6, 34px);
+  }
+}
