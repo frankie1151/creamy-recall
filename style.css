@@ -4316,3 +4316,49 @@ body.iphone-mode .lightbox img {
   background: #ffdcd6;
   border-color: #dd877c;
 }
+/* =========================================================
+   卡片庫排序欄尺寸修正
+   Desktop：7 個篩選器同一行、相同闊度
+   Tablet：自動分成 2 欄
+   Phone：維持 1 欄
+   ========================================================= */
+
+.notes-sort-field {
+  grid-column: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+.notes-sort-field select,
+#notesSortInput {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+/* 大螢幕：搜尋、篩選及排序共 7 格 */
+@media (min-width: 1201px) {
+  #notesView .filters-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    align-items: end;
+  }
+}
+
+/* 平板：每行兩格 */
+@media (min-width: 761px) and (max-width: 1200px) {
+  #notesView .filters-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* 手機：每行一格 */
+@media (max-width: 760px) {
+  #notesView .filters-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .notes-sort-field {
+    width: 100% !important;
+  }
+}
