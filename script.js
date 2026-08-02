@@ -9606,3 +9606,660 @@ if ("serviceWorker" in navigator) {
     if (typeof closeLightbox === "function") closeLightbox();
   }, true);
 })();
+/* =========================================================
+   EDITOR STABILITY PATCH V1
+   修正：
+   1. 文字顏色選取範圍
+   2. 學習模式文字顏色
+   3. 表格最後一格 Enter 離開表格
+   4. 圖片雙重 wrapper
+   5. 編號在 bullet / pinpoint 後繼續
+   ========================================================= */
+
+(function () {
+  "use strict";
+
+  if (window.__creamyEditorStabilityV1) return;
+  window.__creamyEditorStabilityV1 = true;
+
+  const EDITOR_SELECTOR = [
+    "#questionEditor",
+    "#answerEditor",
+    "#studyQuestion",
+    "#studyAnswer",
+    "#studyQuestionSplit",
+    "#studyAnswerSplit"
+  ].join(",");
+
+  const savedRanges = new Map();
+
+  /* ---------------------------------------------------------
+     Selection helpers
+     --------------------------------------------------------- */
+
+  function getEditorFromNode(node) {
+    if (!node) return null;
+
+    const element =
+      node.nodeType === Node.ELEMENT_NODE
+        ? node
+        : node.parentElement;
+
+    return element?.closest?.(EDITOR_SELECTOR) || null;
+  }
+
+  function saveEditorSelection(editor) {
+    if (!editor) return;
+
+    const selection = window.getSelection();
+
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+
+    if (!editor.contains(range.commonAncestorContainer)) return;
+
+    savedRanges.set(editor.id, range.cloneRange());
+  }
+
+  function restoreEditorSelection(editor) {
+    if (!editor) return false;
+
+    const range = savedRanges.get(editor.id);
+
+    if (!range) return false;
+
+    try {
+      const selection = window.getSelection();
+
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function focusWithoutScroll(editor) {
+    if (!editor) return;
+
+    try {
+      editor.focus({ preventScroll: true });
+    } catch {
+      editor.focus();
+    }
+  }
+
+  document.addEventListener("selectionchange", () => {
+    const selection = window.getSelection();
+
+    if (!selection || selection.rangeCount === 0) return;
+
+    const editor = getEditorFromNode(
+      selection.getRangeAt(0).commonAncestorContainer
+    );
+
+    if (editor) saveEditorSelection(editor);
+  });
+
+  /*
+    在工具按鈕搶走焦點前先保存選取文字。
+  */
+  document.addEventListener(
+    "pointerdown",
+    event => {
+      const button = event.target.closest(
+        "[data-color], [data-highlight], [data-clear-highlight], [data-study-text-color], [data-study-highlight]"
+      );
+
+      if (!button) return;
+
+      let editor = null;
+
+      if (button.dataset.editor) {
+        editor = document.getElementById(button.dataset.editor);
+      } else if (
+        typeof getStudyEditableTargets === "function" &&
+        typeof studyEditingTarget !== "undefined"
+      ) {
+        editor = getStudyEditableTargets()?.[studyEditingTarget] || null;
+      }
+
+      if (editor) saveEditorSelection(editor);
+    },
+    true
+  );
+
+  /* ---------------------------------------------------------
+     Stable text color
+     --------------------------------------------------------- */
+
+  window.applyTextColor = applyTextColor = function (editorId, color) {
+    const editor = document.getElementById(editorId);
+
+    if (!editor || !color) return;
+
+    focusWithoutScroll(editor);
+    restoreEditorSelection(editor);
+
+    const selection = window.getSelection();
+
+    if (
+      !selection ||
+      selection.rangeCount === 0 ||
+      selection.isCollapsed
+    ) {
+      if (typeof showToast === "function") {
+        showToast(
+          "請先選取文字",
+          "選取文字後再按文字顏色。",
+          "warn"
+        );
+      }
+
+      return;
+    }
+
+    try {
+      document.execCommand("styleWithCSS", false, true);
+      document.execCommand("foreColor", false, color);
+    } catch (error) {
+      console.error("Text color failed", error);
+    }
+
+    saveEditorSelection(editor);
+  };
+
+  /* ---------------------------------------------------------
+     Add text colors to study inline editor
+     --------------------------------------------------------- */
+
+  function injectStudyTextColors() {
+    const bar = document.getElementById("studyInlineEditBar");
+
+    if (!bar || bar.querySelector("[data-study-text-colors]")) return;
+
+    const group = document.createElement("span");
+    group.dataset.studyTextColors = "1";
+    group.className = "study-text-color-group";
+
+    group.innerHTML = `
+      <span class="toolbar-sep"></span>
+
+      <button
+        type="button"
+        class="text-color-dot black"
+        data-study-text-color="#222222"
+        title="黑色文字"
+      ></button>
+
+      <button
+        type="button"
+        class="text-color-dot red"
+        data-study-text-color="#b74b4b"
+        title="紅色文字"
+      ></button>
+
+      <button
+        type="button"
+        class="text-color-dot blue"
+        data-study-text-color="#376fa8"
+        title="藍色文字"
+      ></button>
+
+      <button
+        type="button"
+        class="text-color-dot greenText"
+        data-study-text-color="#3d7d52"
+        title="綠色文字"
+      ></button>
+    `;
+
+    const saveButton = document.getElementById("studySaveInlineBtn");
+
+    if (saveButton) {
+      saveButton.insertAdjacentElement("beforebegin", group);
+    } else {
+      bar.appendChild(group);
+    }
+  }
+
+  document.addEventListener(
+    "click",
+    event => {
+      const button = event.target.closest("[data-study-text-color]");
+
+      if (!button) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (
+        typeof getStudyEditableTargets !== "function" ||
+        typeof studyEditingTarget === "undefined"
+      ) {
+        return;
+      }
+
+      const editor =
+        getStudyEditableTargets()?.[studyEditingTarget] || null;
+
+      if (!editor) return;
+
+      applyTextColor(editor.id, button.dataset.studyTextColor);
+    },
+    true
+  );
+
+  /* ---------------------------------------------------------
+     Enter from last table cell
+     --------------------------------------------------------- */
+
+  function putCaretAtStart(element) {
+    const range = document.createRange();
+    const selection = window.getSelection();
+
+    range.selectNodeContents(element);
+    range.collapse(true);
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function exitTable(table) {
+    if (!table?.parentNode) return;
+
+    let paragraph = table.nextElementSibling;
+
+    if (!paragraph || paragraph.tagName !== "P") {
+      paragraph = document.createElement("p");
+      paragraph.innerHTML = "<br>";
+      table.insertAdjacentElement("afterend", paragraph);
+    }
+
+    putCaretAtStart(paragraph);
+  }
+
+  document.addEventListener(
+    "keydown",
+    event => {
+      if (event.key !== "Enter" || event.shiftKey) return;
+
+      const editor = event.target.closest(EDITOR_SELECTOR);
+
+      if (!editor || editor.contentEditable !== "true") return;
+
+      const selection = window.getSelection();
+
+      if (!selection || selection.rangeCount === 0) return;
+
+      const node = selection.anchorNode;
+      const element =
+        node?.nodeType === Node.ELEMENT_NODE
+          ? node
+          : node?.parentElement;
+
+      const cell = element?.closest?.("td, th");
+
+      if (!cell || !editor.contains(cell)) return;
+
+      const table = cell.closest("table");
+
+      if (!table) return;
+
+      const cells = [...table.querySelectorAll("th, td")];
+      const lastCell = cells[cells.length - 1];
+
+      /*
+        最後一格：
+        Enter = 離開表格
+        Shift + Enter = 保留在格內換行
+      */
+      if (cell === lastCell) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        exitTable(table);
+      }
+    },
+    true
+  );
+
+  /* ---------------------------------------------------------
+     Image wrapper normalization
+     --------------------------------------------------------- */
+
+  function normalizeImageBoxes(root) {
+    if (!root?.querySelectorAll) return;
+
+    /*
+      把：
+      image-box > image-box > img
+
+      改為：
+      image-box > img
+    */
+    let nested = root.querySelector(
+      ".inline-image-box .inline-image-box"
+    );
+
+    while (nested) {
+      const parent = nested.parentNode;
+
+      while (nested.firstChild) {
+        parent.insertBefore(nested.firstChild, nested);
+      }
+
+      nested.remove();
+
+      nested = root.querySelector(
+        ".inline-image-box .inline-image-box"
+      );
+    }
+
+    /*
+      沒有 wrapper 的 inline 圖片只包一層。
+    */
+    root.querySelectorAll("img[data-file-id]").forEach(img => {
+      if (img.closest(".inline-image-box")) return;
+
+      const box = document.createElement("span");
+
+      box.className = "inline-image-box";
+      box.contentEditable = "false";
+      box.style.width = "360px";
+
+      img.replaceWith(box);
+      box.appendChild(img);
+    });
+
+    /*
+      清除沒有圖片、沒有文字的空框。
+    */
+    root.querySelectorAll(".inline-image-box").forEach(box => {
+      const hasImage = !!box.querySelector("img");
+      const text = (box.textContent || "").trim();
+
+      if (!hasImage && !text) box.remove();
+    });
+  }
+
+  /*
+    如果游標不小心停在舊圖片框內，
+    插入新圖前先移到圖片框後方。
+  */
+  const baseInsertInlineImageFiles = insertInlineImageFiles;
+
+  window.insertInlineImageFiles =
+    insertInlineImageFiles =
+    async function (editorId, files) {
+      const editor = document.getElementById(editorId);
+
+      if (editor) {
+        const selection = window.getSelection();
+
+        if (selection?.rangeCount) {
+          const node = selection.anchorNode;
+          const element =
+            node?.nodeType === Node.ELEMENT_NODE
+              ? node
+              : node?.parentElement;
+
+          const imageBox = element?.closest?.(".inline-image-box");
+
+          if (imageBox && editor.contains(imageBox)) {
+            let paragraph = imageBox.nextElementSibling;
+
+            if (!paragraph || paragraph.tagName !== "P") {
+              paragraph = document.createElement("p");
+              paragraph.innerHTML = "<br>";
+              imageBox.insertAdjacentElement("afterend", paragraph);
+            }
+
+            putCaretAtStart(paragraph);
+          }
+        }
+      }
+
+      const result = await baseInsertInlineImageFiles(
+        editorId,
+        files
+      );
+
+      normalizeImageBoxes(editor);
+
+      return result;
+    };
+
+  /* ---------------------------------------------------------
+     Ordered-list continuation
+     --------------------------------------------------------- */
+
+  function getDirectListItems(list) {
+    return [...list.children].filter(
+      child => child.tagName === "LI"
+    );
+  }
+
+  function getTopLevelOrderedLists(root) {
+    return [...root.querySelectorAll("ol")].filter(list => {
+      const parentList = list.parentElement?.closest("ol, ul");
+      return !parentList;
+    });
+  }
+
+  function normalizeOrderedLists(root) {
+    if (!root?.querySelectorAll) return;
+
+    const lists = getTopLevelOrderedLists(root);
+
+    let nextNumber = null;
+
+    lists.forEach((list, index) => {
+      const items = getDirectListItems(list);
+
+      if (!items.length) return;
+
+      let start = Number.parseInt(
+        list.getAttribute("start") || "",
+        10
+      );
+
+      if (!Number.isFinite(start) || start < 1) {
+        start = index === 0 || nextNumber === null
+          ? 1
+          : nextNumber;
+      } else if (index > 0 && nextNumber !== null) {
+        /*
+          第二段或之後的 numbered list，
+          即使中間有 bullet／pinpoint，也接續上一個數字。
+        */
+        start = nextNumber;
+      }
+
+      if (start === 1) {
+        list.removeAttribute("start");
+      } else {
+        list.setAttribute("start", String(start));
+      }
+
+      nextNumber = start + items.length;
+    });
+  }
+
+  /*
+    原本 sanitizer 會刪除 OL start 和 LI value。
+    先暫存在 class，清理後再恢復。
+  */
+  const baseSanitizeRichHtml = sanitizeRichHtml;
+
+  window.sanitizeRichHtml =
+    sanitizeRichHtml =
+    function (html = "") {
+      const before = document.createElement("div");
+
+      before.innerHTML = html || "";
+
+      normalizeImageBoxes(before);
+      normalizeOrderedLists(before);
+
+      before.querySelectorAll("ol[start]").forEach(list => {
+        const start = Number.parseInt(
+          list.getAttribute("start"),
+          10
+        );
+
+        if (Number.isFinite(start) && start > 1) {
+          list.classList.add(`creamy-ol-start-${start}`);
+        }
+      });
+
+      before.querySelectorAll("li[value]").forEach(item => {
+        const value = Number.parseInt(
+          item.getAttribute("value"),
+          10
+        );
+
+        if (Number.isFinite(value) && value > 0) {
+          item.classList.add(`creamy-li-value-${value}`);
+        }
+      });
+
+      const safe = baseSanitizeRichHtml(before.innerHTML);
+
+      const after = document.createElement("div");
+
+      after.innerHTML = safe;
+
+      after.querySelectorAll("ol").forEach(list => {
+        const className = [...list.classList].find(name =>
+          /^creamy-ol-start-\d+$/.test(name)
+        );
+
+        if (!className) return;
+
+        const start = className.replace(
+          "creamy-ol-start-",
+          ""
+        );
+
+        list.setAttribute("start", start);
+        list.classList.remove(className);
+
+        if (!list.className) list.removeAttribute("class");
+      });
+
+      after.querySelectorAll("li").forEach(item => {
+        const className = [...item.classList].find(name =>
+          /^creamy-li-value-\d+$/.test(name)
+        );
+
+        if (!className) return;
+
+        const value = className.replace(
+          "creamy-li-value-",
+          ""
+        );
+
+        item.setAttribute("value", value);
+        item.classList.remove(className);
+
+        if (!item.className) item.removeAttribute("class");
+      });
+
+      normalizeImageBoxes(after);
+      normalizeOrderedLists(after);
+
+      return after.innerHTML.trim();
+    };
+
+  /*
+    每次取得編輯器內容前，再整理一次。
+  */
+  const baseGetEditorHtml = getEditorHtml;
+
+  window.getEditorHtml =
+    getEditorHtml =
+    function (editor) {
+      normalizeImageBoxes(editor);
+      normalizeOrderedLists(editor);
+
+      return baseGetEditorHtml(editor);
+    };
+
+  /*
+    Paste 完成後才整理 DOM，避免打斷瀏覽器 paste。
+  */
+  document.addEventListener(
+    "paste",
+    event => {
+      const editor = event.target.closest(EDITOR_SELECTOR);
+
+      if (!editor) return;
+
+      setTimeout(() => {
+        normalizeImageBoxes(editor);
+        normalizeOrderedLists(editor);
+      }, 30);
+
+      setTimeout(() => {
+        normalizeImageBoxes(editor);
+        normalizeOrderedLists(editor);
+      }, 160);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "input",
+    event => {
+      const editor = event.target.closest(EDITOR_SELECTOR);
+
+      if (!editor) return;
+
+      normalizeImageBoxes(editor);
+      normalizeOrderedLists(editor);
+    },
+    true
+  );
+
+  /* ---------------------------------------------------------
+     Init
+     --------------------------------------------------------- */
+
+  function initEditorPatch() {
+    injectStudyTextColors();
+
+    document.querySelectorAll(EDITOR_SELECTOR).forEach(editor => {
+      normalizeImageBoxes(editor);
+      normalizeOrderedLists(editor);
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      initEditorPatch
+    );
+  } else {
+    initEditorPatch();
+  }
+
+  const observer = new MutationObserver(() => {
+    injectStudyTextColors();
+  });
+
+  const studyBar = document.getElementById(
+    "studyInlineEditBar"
+  );
+
+  if (studyBar) {
+    observer.observe(studyBar, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  window.creamyEditorPatchV1Repair = initEditorPatch;
+})();
