@@ -3348,12 +3348,6 @@ function bindEvents() {
   els.testSoundBtn.addEventListener("click", () => playSound("mastered"));
   els.enableNotifyBtn.addEventListener("click", requestNotificationPermission);
 
-  els.cakeGoalInput.addEventListener("change", () => {
-    appState.settings.cakeGoal = clamp(Number(els.cakeGoalInput.value || 30), 3, 365);
-    requestSave("蛋糕設定已更新");
-    renderCake();
-  });
-
   els.themeButtons.forEach(btn => {
     btn.addEventListener("click", () => {
       const theme = btn.dataset.theme || "cream";
