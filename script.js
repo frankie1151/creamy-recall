@@ -12471,3 +12471,362 @@ if ("serviceWorker" in navigator) {
   window.creamyLibraryMobileFinalV2Repair =
     initLibraryMobileFinalV2;
 })();
+/* =========================================================
+   CARD LIBRARY SORT REPAIR V3
+   修正排序選單有改變但卡片次序沒有改變
+   ========================================================= */
+
+(function () {
+  "use strict";
+
+  if (window.__creamyCardLibrarySortV3) return;
+  window.__creamyCardLibrarySortV3 = true;
+
+  function sortDateValue(value) {
+    if (!value) return 0;
+
+    const time = Date.parse(
+      String(value).length === 10
+        ? `${value}T12:00:00`
+        : value
+    );
+
+    return Number.isFinite(time) ? time : 0;
+  }
+
+  function getForgotCount(note) {
+    const historyCount = (note.reviewHistory || [])
+      .filter(item => item?.action === "forgot")
+      .length;
+
+    return Math.max(
+      historyCount,
+      Number(note.wrongCount || 0),
+      Number(note.lapseCount || 0)
+    );
+  }
+
+  function getRecentValidReviews(note, limit = 10) {
+    return (note.reviewHistory || [])
+      .filter(item =>
+        ["forgot", "okay", "remembered", "mastered"]
+          .includes(item?.action)
+      )
+      .slice(-limit);
+  }
+
+  function isFrequentWrong(note) {
+    const recent = getRecentValidReviews(note, 10);
+
+    if (recent.length >= 4) {
+      const forgot = recent.filter(
+        item => item.action === "forgot"
+      ).length;
+
+      return forgot >= 3 &&
+        forgot / recent.length >= 0.4;
+    }
+
+    const reviewCount = Number(note.reviewCount || 0);
+    const forgotCount = getForgotCount(note);
+
+    return reviewCount >= 4 &&
+      forgotCount >= 3 &&
+      forgotCount / reviewCount >= 0.4;
+  }
+
+  function normalizeSearchText(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .toLocaleLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function getSearchScore(note, rawQuery) {
+    const query = normalizeSearchText(rawQuery);
+
+    if (!query) return 0;
+
+    const question = normalizeSearchText(
+      stripHtml(note.questionHtml || note.question || "")
+    );
+
+    const answer = normalizeSearchText(
+      stripHtml(note.answerHtml || note.answer || "")
+    );
+
+    const extraNotes = normalizeSearchText(note.notes || "");
+    const deck = normalizeSearchText(getDeckName(note.deckId));
+
+    let score = 0;
+
+    if (question === query) score += 10000;
+    else if (question.startsWith(query)) score += 8500;
+    else if (question.includes(query)) score += 6500;
+
+    if (answer === query) score += 6000;
+    else if (answer.startsWith(query)) score += 5200;
+    else if (answer.includes(query)) score += 4200;
+
+    if (extraNotes === query) score += 3600;
+    else if (extraNotes.startsWith(query)) score += 3100;
+    else if (extraNotes.includes(query)) score += 2600;
+
+    if (deck === query) score += 2200;
+    else if (deck.startsWith(query)) score += 1800;
+    else if (deck.includes(query)) score += 1400;
+
+    return score;
+  }
+
+  function getSelectedSortMode() {
+    return (
+      document.getElementById("notesSortInput")?.value ||
+      appState.settings.cardLibrarySort ||
+      "relevance"
+    );
+  }
+
+  function sortCards(notes) {
+    const result = [...notes];
+    const mode = getSelectedSortMode();
+    const query = els.searchInput?.value.trim() || "";
+
+    const updatedFallback = (a, b) =>
+      sortDateValue(b.updatedAt) -
+        sortDateValue(a.updatedAt) ||
+      sortDateValue(b.createdAt) -
+        sortDateValue(a.createdAt) ||
+      String(a.id).localeCompare(String(b.id));
+
+    if (mode === "stage-asc") {
+      return result.sort((a, b) =>
+        Number(a.reviewStage || 0) -
+          Number(b.reviewStage || 0) ||
+        updatedFallback(a, b)
+      );
+    }
+
+    if (mode === "stage-desc") {
+      return result.sort((a, b) =>
+        Number(b.reviewStage || 0) -
+          Number(a.reviewStage || 0) ||
+        updatedFallback(a, b)
+      );
+    }
+
+    if (mode === "newest") {
+      return result.sort((a, b) =>
+        sortDateValue(b.createdAt) -
+          sortDateValue(a.createdAt) ||
+        updatedFallback(a, b)
+      );
+    }
+
+    if (mode === "oldest") {
+      return result.sort((a, b) =>
+        sortDateValue(a.createdAt) -
+          sortDateValue(b.createdAt) ||
+        updatedFallback(a, b)
+      );
+    }
+
+    if (mode === "forgot-desc") {
+      return result.sort((a, b) =>
+        getForgotCount(b) -
+          getForgotCount(a) ||
+        updatedFallback(a, b)
+      );
+    }
+
+    if (mode === "frequent-first") {
+      return result.sort((a, b) =>
+        Number(isFrequentWrong(b)) -
+          Number(isFrequentWrong(a)) ||
+        getForgotCount(b) -
+          getForgotCount(a) ||
+        updatedFallback(a, b)
+      );
+    }
+
+    if (mode === "due-first") {
+      return result.sort((a, b) =>
+        String(a.nextReviewDate || "9999-12-31")
+          .localeCompare(
+            String(b.nextReviewDate || "9999-12-31")
+          ) ||
+        updatedFallback(a, b)
+      );
+    }
+
+    if (mode === "updated") {
+      return result.sort(updatedFallback);
+    }
+
+    /*
+      relevance：
+      有搜尋文字時按相關度；
+      沒有搜尋文字時按最近更新。
+    */
+    if (query) {
+      return result.sort((a, b) =>
+        getSearchScore(b, query) -
+          getSearchScore(a, query) ||
+        updatedFallback(a, b)
+      );
+    }
+
+    return result.sort(updatedFallback);
+  }
+
+  function ensureSortSelector() {
+    const filters = document.querySelector(
+      "#notesView .filters-grid"
+    );
+
+    if (!filters) return null;
+
+    let select = document.getElementById("notesSortInput");
+
+    if (select) return select;
+
+    const field = document.createElement("div");
+    field.className = "field notes-sort-field";
+
+    field.innerHTML = `
+      <label>排序</label>
+
+      <select id="notesSortInput">
+        <option value="relevance">搜尋相關度／最近更新</option>
+        <option value="stage-asc">階段：新卡至高階</option>
+        <option value="stage-desc">階段：高階至新卡</option>
+        <option value="newest">最新加入</option>
+        <option value="oldest">最早加入</option>
+        <option value="forgot-desc">忘了次數最多</option>
+        <option value="frequent-first">常錯優先</option>
+        <option value="due-first">複習日期最早</option>
+        <option value="updated">最近修改</option>
+      </select>
+    `;
+
+    filters.appendChild(field);
+    select = field.querySelector("select");
+
+    select.value =
+      appState.settings.cardLibrarySort || "relevance";
+
+    select.addEventListener("change", () => {
+      appState.settings.cardLibrarySort = select.value;
+      requestSave("卡片排序已更新");
+
+      /*
+        直接重新畫卡，選擇後立即看到變化。
+      */
+      renderNotes();
+    });
+
+    return select;
+  }
+
+  /*
+    直接取代最後使用的 renderNotes。
+    先排好 notes，才產生卡片 HTML。
+  */
+  window.renderNotes =
+    renderNotes =
+    function () {
+      populateDeckSelects();
+
+      if (currentDeckWall) {
+        els.filterDeck.value = currentDeckWall;
+      }
+
+      renderDeckWallHeader();
+      ensureSortSelector();
+
+      const notes = sortCards(getFilteredNotes());
+
+      if (!notes.length) {
+        els.notesList.innerHTML =
+          `<div class="empty-state">目前沒有符合條件的卡片。</div>`;
+
+        return;
+      }
+
+      els.notesList.innerHTML = notes.map(note => {
+        const question = getPlainPreviewFromHtml(
+          note.questionHtml,
+          90
+        );
+
+        const deck = getDeck(note.deckId);
+        const fitClass = getFitClass(
+          stripHtml(note.questionHtml)
+        );
+
+        return `
+          <div
+            class="wall-card creamy-card"
+            data-context-note="${escapeAttr(note.id)}"
+            data-click-study-note="${escapeAttr(note.id)}"
+            title="點擊立即複習；長按開啟操作選單"
+          >
+            <div class="wall-card-top">
+              <div class="wall-card-tags">
+                <span
+                  class="mini-dot"
+                  style="--dot-color:${escapeAttr(deck.color)}"
+                ></span>
+
+                <span>${escapeHtml(deck.name)}</span>
+              </div>
+
+              <button
+                class="star-btn ${note.starred ? "active" : ""}"
+                type="button"
+                onclick="event.stopPropagation(); playSound('preview'); toggleStar('${escapeAttr(note.id)}')"
+                title="標星"
+              >
+                ${note.starred ? "★" : "☆"}
+              </button>
+            </div>
+
+            <div class="wall-title ${fitClass}">
+              ${escapeHtml(question || "無文字問題")}
+            </div>
+
+            <div class="wall-bottom-subtle">
+              ${escapeHtml(getStudyStateLabel(note))}
+            </div>
+          </div>
+        `;
+      }).join("");
+    };
+
+  /*
+    如果搜尋、Deck 或其他篩選改變，
+    舊事件仍會呼叫目前的 renderNotes。
+  */
+  function initCardLibrarySortV3() {
+    ensureSortSelector();
+
+    if (currentView === "notes") {
+      renderNotes();
+    }
+  }
+
+  if (typeof creamyFinalWhenReady === "function") {
+    creamyFinalWhenReady(initCardLibrarySortV3);
+  } else if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      initCardLibrarySortV3
+    );
+  } else {
+    initCardLibrarySortV3();
+  }
+
+  window.creamyCardLibrarySortV3Repair =
+    initCardLibrarySortV3;
+})();
