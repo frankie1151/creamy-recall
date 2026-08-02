@@ -9145,6 +9145,7 @@ if ("serviceWorker" in navigator) {
       return baseP.apply(this, arguments);
     };
   }
+	
 })();
 
 
@@ -10262,4 +10263,941 @@ if ("serviceWorker" in navigator) {
   }
 
   window.creamyEditorPatchV1Repair = initEditorPatch;
+})();
+/* =========================================================
+   MOBILE INTERACTION + IMAGE ZOOM + COLOR PALETTE V1
+   1. 手機 Deck / 卡片長按選單
+   2. 長按卡片後可刪除
+   3. Question / Answer 捲動修正配合
+   4. Lightbox 只縮放圖片
+   5. 更多文字顏色收納選單
+   ========================================================= */
+
+(function () {
+  "use strict";
+
+  if (window.__creamyMobileInteractionV1) return;
+  window.__creamyMobileInteractionV1 = true;
+
+  const isTouchPhone = () =>
+    window.matchMedia(
+      "(max-width: 767px) and (pointer: coarse)"
+    ).matches;
+
+  /* =======================================================
+     A. 手機長按 Deck / 卡片
+     ======================================================= */
+
+  const LONG_PRESS_SELECTOR = [
+    "[data-context-deck]",
+    "[data-context-note]"
+  ].join(",");
+
+  let longPressTimer = null;
+  let longPressElement = null;
+  let longPressStartX = 0;
+  let longPressStartY = 0;
+  let longPressTriggered = false;
+  let suppressClickUntil = 0;
+
+  function clearLongPress() {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+
+  function cancelLongPress() {
+    clearLongPress();
+    longPressElement = null;
+  }
+
+  function openMobileContextMenu(element, x, y) {
+    if (!element) return;
+
+    const noteId = element.dataset.contextNote || "";
+    const deckId = element.dataset.contextDeck || "";
+
+    const fakeEvent = {
+      clientX: x,
+      clientY: y,
+      preventDefault() {},
+      stopPropagation() {},
+      stopImmediatePropagation() {}
+    };
+
+    if (
+      noteId &&
+      typeof window.openNoteActionMenuFinal === "function"
+    ) {
+      window.openNoteActionMenuFinal(fakeEvent, noteId);
+      return;
+    }
+
+    if (
+      deckId &&
+      typeof openDeckActionMenuFinal === "function"
+    ) {
+      openDeckActionMenuFinal(fakeEvent, deckId);
+    }
+  }
+
+  document.addEventListener(
+    "pointerdown",
+    event => {
+      if (!isTouchPhone()) return;
+
+      if (
+        event.pointerType === "mouse" &&
+        event.button !== 0
+      ) {
+        return;
+      }
+
+      /*
+        星號、更多按鈕和選單本身仍保留普通點擊，
+        不啟動長按。
+      */
+      if (
+        event.target.closest(
+          ".star-btn, .ip-deck-more, .context-menu, select, input, textarea, a"
+        )
+      ) {
+        return;
+      }
+
+      const element = event.target.closest(
+        LONG_PRESS_SELECTOR
+      );
+
+      if (!element) return;
+
+      clearLongPress();
+
+      longPressElement = element;
+      longPressStartX = event.clientX;
+      longPressStartY = event.clientY;
+      longPressTriggered = false;
+
+      longPressTimer = setTimeout(() => {
+        if (!longPressElement) return;
+
+        longPressTriggered = true;
+        suppressClickUntil = Date.now() + 900;
+
+        longPressElement.classList.add(
+          "mobile-long-press-active"
+        );
+
+        try {
+          navigator.vibrate?.(18);
+        } catch {
+          // iPhone 不支援 vibrate 時略過
+        }
+
+        openMobileContextMenu(
+          longPressElement,
+          longPressStartX,
+          longPressStartY
+        );
+
+        if (typeof playSound === "function") {
+          playSound("preview");
+        }
+
+        setTimeout(() => {
+          longPressElement?.classList.remove(
+            "mobile-long-press-active"
+          );
+        }, 260);
+      }, 560);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "pointermove",
+    event => {
+      if (!longPressTimer || !longPressElement) return;
+
+      const moved = Math.hypot(
+        event.clientX - longPressStartX,
+        event.clientY - longPressStartY
+      );
+
+      /*
+        手指移動代表正在捲動，不當作長按。
+      */
+      if (moved > 12) {
+        cancelLongPress();
+      }
+    },
+    true
+  );
+
+  document.addEventListener(
+    "pointerup",
+    () => {
+      clearLongPress();
+
+      setTimeout(() => {
+        longPressElement?.classList.remove(
+          "mobile-long-press-active"
+        );
+
+        longPressElement = null;
+      }, 0);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "pointercancel",
+    cancelLongPress,
+    true
+  );
+
+  /*
+    長按後吞掉緊接着產生的 click，
+    避免同時進入 Deck／開始複習。
+  */
+  document.addEventListener(
+    "click",
+    event => {
+      if (
+        !longPressTriggered &&
+        Date.now() > suppressClickUntil
+      ) {
+        return;
+      }
+
+      if (
+        Date.now() <= suppressClickUntil &&
+        event.target.closest(LONG_PRESS_SELECTOR)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        longPressTriggered = false;
+      }
+    },
+    true
+  );
+
+  /* =======================================================
+     B. Lightbox 圖片獨立雙指縮放
+     ======================================================= */
+
+  const zoomState = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    startScale: 1,
+    startX: 0,
+    startY: 0,
+    startDistance: 0,
+    startCenterX: 0,
+    startCenterY: 0,
+    panStartX: 0,
+    panStartY: 0,
+    panOriginX: 0,
+    panOriginY: 0,
+    mode: ""
+  };
+
+  function getLightbox() {
+    return document.getElementById("lightboxModal");
+  }
+
+  function getLightboxImage() {
+    return document.getElementById("lightboxImage");
+  }
+
+  function distanceBetweenTouches(touch1, touch2) {
+    return Math.hypot(
+      touch2.clientX - touch1.clientX,
+      touch2.clientY - touch1.clientY
+    );
+  }
+
+  function centerBetweenTouches(touch1, touch2) {
+    return {
+      x: (touch1.clientX + touch2.clientX) / 2,
+      y: (touch1.clientY + touch2.clientY) / 2
+    };
+  }
+
+  function clampImagePosition() {
+    const image = getLightboxImage();
+
+    if (!image || zoomState.scale <= 1) {
+      zoomState.x = 0;
+      zoomState.y = 0;
+      return;
+    }
+
+    const rect = image.getBoundingClientRect();
+
+    /*
+      保留部分圖片在畫面內，避免完全拖走。
+    */
+    const maxX = Math.max(
+      40,
+      (rect.width * (zoomState.scale - 1)) / 2
+    );
+
+    const maxY = Math.max(
+      40,
+      (rect.height * (zoomState.scale - 1)) / 2
+    );
+
+    zoomState.x = Math.max(
+      -maxX,
+      Math.min(maxX, zoomState.x)
+    );
+
+    zoomState.y = Math.max(
+      -maxY,
+      Math.min(maxY, zoomState.y)
+    );
+  }
+
+  function applyImageTransform(animate = false) {
+    const image = getLightboxImage();
+
+    if (!image) return;
+
+    clampImagePosition();
+
+    image.style.transition = animate
+      ? "transform 180ms ease"
+      : "none";
+
+    image.style.transform =
+      `translate3d(${zoomState.x}px, ${zoomState.y}px, 0) ` +
+      `scale(${zoomState.scale})`;
+  }
+
+  function resetImageZoom(animate = false) {
+    zoomState.scale = 1;
+    zoomState.x = 0;
+    zoomState.y = 0;
+    zoomState.mode = "";
+
+    applyImageTransform(animate);
+  }
+
+  const originalOpenLightbox =
+    typeof openLightbox === "function"
+      ? openLightbox
+      : null;
+
+  const originalCloseLightbox =
+    typeof closeLightbox === "function"
+      ? closeLightbox
+      : null;
+
+  if (originalOpenLightbox) {
+    window.openLightbox =
+      openLightbox =
+      function (src) {
+        resetImageZoom(false);
+        document.body.classList.add("lightbox-open");
+
+        return originalOpenLightbox.call(this, src);
+      };
+  }
+
+  if (originalCloseLightbox) {
+    window.closeLightbox =
+      closeLightbox =
+      function () {
+        resetImageZoom(false);
+        document.body.classList.remove("lightbox-open");
+
+        return originalCloseLightbox.call(this);
+      };
+  }
+
+  function bindImageZoom() {
+    const lightbox = getLightbox();
+    const image = getLightboxImage();
+
+    if (
+      !lightbox ||
+      !image ||
+      lightbox.dataset.imageZoomBound === "1"
+    ) {
+      return;
+    }
+
+    lightbox.dataset.imageZoomBound = "1";
+
+    lightbox.addEventListener(
+      "touchstart",
+      event => {
+        if (event.target.closest(".lightbox-close")) return;
+
+        if (event.touches.length === 2) {
+          event.preventDefault();
+
+          const [touch1, touch2] = event.touches;
+          const center = centerBetweenTouches(
+            touch1,
+            touch2
+          );
+
+          zoomState.mode = "pinch";
+          zoomState.startScale = zoomState.scale;
+          zoomState.startDistance =
+            distanceBetweenTouches(touch1, touch2);
+
+          zoomState.startCenterX = center.x;
+          zoomState.startCenterY = center.y;
+          zoomState.startX = zoomState.x;
+          zoomState.startY = zoomState.y;
+
+          return;
+        }
+
+        if (
+          event.touches.length === 1 &&
+          zoomState.scale > 1
+        ) {
+          event.preventDefault();
+
+          const touch = event.touches[0];
+
+          zoomState.mode = "pan";
+          zoomState.panStartX = touch.clientX;
+          zoomState.panStartY = touch.clientY;
+          zoomState.panOriginX = zoomState.x;
+          zoomState.panOriginY = zoomState.y;
+        }
+      },
+      { passive: false }
+    );
+
+    lightbox.addEventListener(
+      "touchmove",
+      event => {
+        if (event.touches.length === 2) {
+          event.preventDefault();
+
+          const [touch1, touch2] = event.touches;
+          const distance =
+            distanceBetweenTouches(touch1, touch2);
+
+          const center = centerBetweenTouches(
+            touch1,
+            touch2
+          );
+
+          const ratio =
+            zoomState.startDistance > 0
+              ? distance / zoomState.startDistance
+              : 1;
+
+          zoomState.scale = Math.max(
+            1,
+            Math.min(
+              5,
+              zoomState.startScale * ratio
+            )
+          );
+
+          zoomState.x =
+            zoomState.startX +
+            (center.x - zoomState.startCenterX);
+
+          zoomState.y =
+            zoomState.startY +
+            (center.y - zoomState.startCenterY);
+
+          applyImageTransform(false);
+          return;
+        }
+
+        if (
+          event.touches.length === 1 &&
+          zoomState.scale > 1 &&
+          zoomState.mode === "pan"
+        ) {
+          event.preventDefault();
+
+          const touch = event.touches[0];
+
+          zoomState.x =
+            zoomState.panOriginX +
+            touch.clientX -
+            zoomState.panStartX;
+
+          zoomState.y =
+            zoomState.panOriginY +
+            touch.clientY -
+            zoomState.panStartY;
+
+          applyImageTransform(false);
+        }
+      },
+      { passive: false }
+    );
+
+    lightbox.addEventListener(
+      "touchend",
+      event => {
+        if (event.touches.length === 1) {
+          const touch = event.touches[0];
+
+          zoomState.mode =
+            zoomState.scale > 1 ? "pan" : "";
+
+          zoomState.panStartX = touch.clientX;
+          zoomState.panStartY = touch.clientY;
+          zoomState.panOriginX = zoomState.x;
+          zoomState.panOriginY = zoomState.y;
+
+          return;
+        }
+
+        if (event.touches.length === 0) {
+          zoomState.mode = "";
+
+          if (zoomState.scale < 1.08) {
+            resetImageZoom(true);
+          } else {
+            applyImageTransform(true);
+          }
+        }
+      },
+      { passive: false }
+    );
+
+    /*
+      雙擊圖片快速回復原尺寸。
+    */
+    let lastTap = 0;
+
+    image.addEventListener("pointerup", event => {
+      const now = Date.now();
+
+      if (now - lastTap < 320) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (zoomState.scale > 1) {
+          resetImageZoom(true);
+        } else {
+          zoomState.scale = 2;
+          zoomState.x = 0;
+          zoomState.y = 0;
+          applyImageTransform(true);
+        }
+
+        lastTap = 0;
+        return;
+      }
+
+      lastTap = now;
+    });
+  }
+
+  /* =======================================================
+     C. 收納式文字顏色選單
+     ======================================================= */
+
+  const TEXT_COLORS = [
+    { name: "黑色", value: "#222222" },
+    { name: "深灰", value: "#555555" },
+    { name: "灰色", value: "#888888" },
+
+    { name: "酒紅", value: "#7f1d1d" },
+    { name: "深紅", value: "#991b1b" },
+    { name: "紅色", value: "#dc2626" },
+    { name: "珊瑚紅", value: "#e76f51" },
+    { name: "玫瑰紅", value: "#e11d48" },
+
+    { name: "深藍", value: "#1e3a8a" },
+    { name: "藍色", value: "#2563eb" },
+    { name: "天藍", value: "#0284c7" },
+    { name: "湖水藍", value: "#0891b2" },
+
+    { name: "深紫", value: "#581c87" },
+    { name: "紫色", value: "#7e22ce" },
+    { name: "薰衣草紫", value: "#9333ea" },
+    { name: "粉紫", value: "#c026d3" },
+
+    { name: "深綠", value: "#166534" },
+    { name: "綠色", value: "#15803d" },
+    { name: "墨綠", value: "#0f766e" },
+
+    { name: "橙色", value: "#ea580c" },
+    { name: "金色", value: "#a16207" }
+  ];
+
+  const savedColorRanges = new Map();
+
+  function getColorEditorFromNode(node) {
+    if (!node) return null;
+
+    const element =
+      node.nodeType === Node.ELEMENT_NODE
+        ? node
+        : node.parentElement;
+
+    return element?.closest?.(
+      ".rich-editor, .study-content"
+    ) || null;
+  }
+
+  function saveColorSelection(editor) {
+    if (!editor?.id) return;
+
+    const selection = window.getSelection();
+
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+
+    if (!editor.contains(range.commonAncestorContainer)) {
+      return;
+    }
+
+    savedColorRanges.set(
+      editor.id,
+      range.cloneRange()
+    );
+  }
+
+  function restoreColorSelection(editor) {
+    const range = savedColorRanges.get(editor?.id);
+
+    if (!range) return false;
+
+    try {
+      const selection = window.getSelection();
+
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function getStudyColorEditor() {
+    if (
+      typeof getStudyEditableTargets !== "function" ||
+      typeof studyEditingTarget === "undefined"
+    ) {
+      return null;
+    }
+
+    return (
+      getStudyEditableTargets()?.[studyEditingTarget] ||
+      null
+    );
+  }
+
+  function applyCompactTextColor(editor, color) {
+    if (!editor || !color) return;
+
+    try {
+      editor.focus({ preventScroll: true });
+    } catch {
+      editor.focus();
+    }
+
+    restoreColorSelection(editor);
+
+    const selection = window.getSelection();
+
+    if (
+      !selection ||
+      selection.rangeCount === 0 ||
+      selection.isCollapsed
+    ) {
+      if (typeof showToast === "function") {
+        showToast(
+          "請先選取文字",
+          "選取文字後再選擇顏色。",
+          "warn"
+        );
+      }
+
+      return;
+    }
+
+    try {
+      document.execCommand(
+        "styleWithCSS",
+        false,
+        true
+      );
+
+      document.execCommand(
+        "foreColor",
+        false,
+        color
+      );
+    } catch (error) {
+      console.error("Apply text color failed", error);
+    }
+
+    saveColorSelection(editor);
+  }
+
+  document.addEventListener(
+    "selectionchange",
+    () => {
+      const selection = window.getSelection();
+
+      if (!selection || selection.rangeCount === 0) {
+        return;
+      }
+
+      const editor = getColorEditorFromNode(
+        selection.getRangeAt(0)
+          .commonAncestorContainer
+      );
+
+      if (editor) saveColorSelection(editor);
+    }
+  );
+
+  function buildColorPalette(editorId) {
+    const wrapper = document.createElement("span");
+
+    wrapper.className = "compact-text-color";
+    wrapper.dataset.compactColorFor = editorId;
+
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className =
+      "tool-btn compact-text-color-toggle";
+
+    button.title = "文字顏色";
+    button.innerHTML =
+      `<span class="compact-color-a">A</span>` +
+      `<span class="compact-color-arrow">▾</span>`;
+
+    const palette = document.createElement("span");
+
+    palette.className =
+      "compact-text-color-palette hidden";
+
+    palette.innerHTML = TEXT_COLORS.map(color => `
+      <button
+        type="button"
+        class="compact-text-color-swatch"
+        data-compact-text-color="${color.value}"
+        title="${color.name}"
+        aria-label="${color.name}"
+        style="--compact-text-color:${color.value}"
+      ></button>
+    `).join("");
+
+    wrapper.appendChild(button);
+    wrapper.appendChild(palette);
+
+    return wrapper;
+  }
+
+  function injectCompactColorPalettes() {
+    document
+      .querySelectorAll(".editor-toolbar")
+      .forEach(toolbar => {
+        if (
+          toolbar.querySelector(
+            ".compact-text-color"
+          )
+        ) {
+          return;
+        }
+
+        const reference =
+          toolbar.querySelector(
+            "[data-color]"
+          ) ||
+          toolbar.querySelector(
+            "[data-action='clear-format']"
+          );
+
+        const editorId =
+          reference?.dataset.editor ||
+          toolbar.querySelector("[data-editor]")
+            ?.dataset.editor ||
+          "";
+
+        if (!editorId) return;
+
+        const palette =
+          buildColorPalette(editorId);
+
+        toolbar.appendChild(palette);
+      });
+
+    const studyBar = document.getElementById(
+      "studyInlineEditBar"
+    );
+
+    if (
+      studyBar &&
+      !studyBar.querySelector(
+        ".compact-text-color"
+      )
+    ) {
+      const palette =
+        buildColorPalette("study-active");
+
+      const saveButton =
+        document.getElementById(
+          "studySaveInlineBtn"
+        );
+
+      if (saveButton) {
+        saveButton.insertAdjacentElement(
+          "beforebegin",
+          palette
+        );
+      } else {
+        studyBar.appendChild(palette);
+      }
+    }
+  }
+
+  function closeColorPalettes(except = null) {
+    document
+      .querySelectorAll(
+        ".compact-text-color-palette"
+      )
+      .forEach(palette => {
+        if (palette !== except) {
+          palette.classList.add("hidden");
+        }
+      });
+  }
+
+  document.addEventListener(
+    "pointerdown",
+    event => {
+      const wrapper = event.target.closest(
+        ".compact-text-color"
+      );
+
+      if (!wrapper) return;
+
+      let editor = null;
+      const editorId =
+        wrapper.dataset.compactColorFor;
+
+      if (editorId === "study-active") {
+        editor = getStudyColorEditor();
+      } else {
+        editor = document.getElementById(editorId);
+      }
+
+      if (editor) saveColorSelection(editor);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "click",
+    event => {
+      const toggle = event.target.closest(
+        ".compact-text-color-toggle"
+      );
+
+      if (toggle) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const palette =
+          toggle.parentElement.querySelector(
+            ".compact-text-color-palette"
+          );
+
+        const willOpen =
+          palette.classList.contains("hidden");
+
+        closeColorPalettes();
+
+        if (willOpen) {
+          palette.classList.remove("hidden");
+        }
+
+        return;
+      }
+
+      const swatch = event.target.closest(
+        "[data-compact-text-color]"
+      );
+
+      if (swatch) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const wrapper = swatch.closest(
+          ".compact-text-color"
+        );
+
+        const editorId =
+          wrapper.dataset.compactColorFor;
+
+        const editor =
+          editorId === "study-active"
+            ? getStudyColorEditor()
+            : document.getElementById(editorId);
+
+        applyCompactTextColor(
+          editor,
+          swatch.dataset.compactTextColor
+        );
+
+        closeColorPalettes();
+        return;
+      }
+
+      if (
+        !event.target.closest(
+          ".compact-text-color"
+        )
+      ) {
+        closeColorPalettes();
+      }
+    },
+    true
+  );
+
+  /* =======================================================
+     Init
+     ======================================================= */
+
+  function initMobileInteractionPatch() {
+    bindImageZoom();
+    injectCompactColorPalettes();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      initMobileInteractionPatch
+    );
+  } else {
+    initMobileInteractionPatch();
+  }
+
+  const observer = new MutationObserver(() => {
+    injectCompactColorPalettes();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  window.creamyMobileInteractionV1Repair =
+    initMobileInteractionPatch;
 })();
