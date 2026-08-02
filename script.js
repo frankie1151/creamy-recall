@@ -178,7 +178,7 @@ function collectEls() {
     filterDifficulty: document.getElementById("filterDifficulty"),
     filterStudyState: document.getElementById("filterStudyState"),
     filterStarred: document.getElementById("filterStarred"),
-
+notesSortInput: document.getElementById("notesSortInput"),
     calendarTitle: document.getElementById("calendarTitle"),
     calendarWeekdays: document.getElementById("calendarWeekdays"),
     calendarGrid: document.getElementById("calendarGrid"),
@@ -3241,7 +3241,18 @@ function bindEvents() {
   els.filterDifficulty.addEventListener("change", renderNotes);
   els.filterStudyState.addEventListener("change", renderNotes);
   els.filterStarred.addEventListener("change", renderNotes);
+if (els.notesSortInput) {
+  els.notesSortInput.value =
+    appState.settings.cardLibrarySort || "updated";
 
+  els.notesSortInput.addEventListener("change", () => {
+    appState.settings.cardLibrarySort =
+      els.notesSortInput.value;
+
+    requestSave("卡片排序已更新");
+    renderNotes();
+  });
+}
   els.prevMonthBtn.addEventListener("click", () => {
     currentCalendarDate = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth() - 1, 1);
     renderCalendar();
@@ -3722,7 +3733,205 @@ function enableSubjectDeckDragSortFinal() {
 /* =========================================================
    Notes wall rendering: left click direct study + right click menu
    ========================================================= */
+/* ---------- 卡片庫排序 ---------- */
 
+function getLibraryForgotCount(note) {
+  const historyForgot = (note.reviewHistory || [])
+    .filter(item => item?.action === "forgot")
+    .length;
+
+  return Math.max(
+    historyForgot,
+    Number(note.wrongCount || 0),
+    Number(note.lapseCount || 0)
+  );
+}
+
+function getLibraryRecentReviews(note, limit = 10) {
+  const validActions = [
+    "forgot",
+    "okay",
+    "remembered",
+    "mastered"
+  ];
+
+  return (note.reviewHistory || [])
+    .filter(item => validActions.includes(item?.action))
+    .slice(-limit);
+}
+
+function isLibraryFrequentWrong(note) {
+  const recent = getLibraryRecentReviews(note, 10);
+
+  if (recent.length >= 4) {
+    const forgot = recent.filter(
+      item => item.action === "forgot"
+    ).length;
+
+    return forgot >= 3 &&
+      forgot / recent.length >= 0.4;
+  }
+
+  const reviews = Number(note.reviewCount || 0);
+  const forgot = getLibraryForgotCount(note);
+
+  return reviews >= 4 &&
+    forgot >= 3 &&
+    forgot / reviews >= 0.4;
+}
+
+function normalizeLibrarySearchText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getLibrarySearchScore(note, rawQuery) {
+  const query = normalizeLibrarySearchText(rawQuery);
+
+  if (!query) return 0;
+
+  const question = normalizeLibrarySearchText(
+    stripHtml(note.questionHtml || note.question || "")
+  );
+
+  const answer = normalizeLibrarySearchText(
+    stripHtml(note.answerHtml || note.answer || "")
+  );
+
+  const extraNotes = normalizeLibrarySearchText(
+    note.notes || ""
+  );
+
+  const deck = normalizeLibrarySearchText(
+    getDeckName(note.deckId)
+  );
+
+  let score = 0;
+
+  if (question === query) score += 10000;
+  else if (question.startsWith(query)) score += 8500;
+  else if (question.includes(query)) score += 6500;
+
+  if (answer === query) score += 6000;
+  else if (answer.startsWith(query)) score += 5200;
+  else if (answer.includes(query)) score += 4200;
+
+  if (extraNotes === query) score += 3600;
+  else if (extraNotes.startsWith(query)) score += 3100;
+  else if (extraNotes.includes(query)) score += 2600;
+
+  if (deck === query) score += 2200;
+  else if (deck.startsWith(query)) score += 1800;
+  else if (deck.includes(query)) score += 1400;
+
+  return score;
+}
+
+function sortLibraryNotes(notes) {
+  const result = [...notes];
+
+  const mode =
+    els.notesSortInput?.value ||
+    appState.settings.cardLibrarySort ||
+    "updated";
+
+  const query = els.searchInput?.value.trim() || "";
+
+  /*
+    appState.notes 的位置可用來分辨同一天新增的卡片。
+    新增卡片使用 unshift，所以 index 越小代表越新。
+  */
+  const originalOrder = new Map(
+    appState.notes.map((note, index) => [
+      String(note.id),
+      index
+    ])
+  );
+
+  const originalIndex = note =>
+    originalOrder.get(String(note.id)) ?? 999999;
+
+  const updatedFallback = (a, b) =>
+    String(b.updatedAt || "").localeCompare(
+      String(a.updatedAt || "")
+    ) ||
+    originalIndex(a) - originalIndex(b);
+
+  if (mode === "stage-asc") {
+    return result.sort((a, b) =>
+      Number(a.reviewStage || 0) -
+        Number(b.reviewStage || 0) ||
+      updatedFallback(a, b)
+    );
+  }
+
+  if (mode === "stage-desc") {
+    return result.sort((a, b) =>
+      Number(b.reviewStage || 0) -
+        Number(a.reviewStage || 0) ||
+      updatedFallback(a, b)
+    );
+  }
+
+  if (mode === "newest") {
+    return result.sort((a, b) =>
+      String(b.createdAt || "").localeCompare(
+        String(a.createdAt || "")
+      ) ||
+      originalIndex(a) - originalIndex(b)
+    );
+  }
+
+  if (mode === "oldest") {
+    return result.sort((a, b) =>
+      String(a.createdAt || "").localeCompare(
+        String(b.createdAt || "")
+      ) ||
+      originalIndex(b) - originalIndex(a)
+    );
+  }
+
+  if (mode === "forgot-desc") {
+    return result.sort((a, b) =>
+      getLibraryForgotCount(b) -
+        getLibraryForgotCount(a) ||
+      updatedFallback(a, b)
+    );
+  }
+
+  if (mode === "frequent-first") {
+    return result.sort((a, b) =>
+      Number(isLibraryFrequentWrong(b)) -
+        Number(isLibraryFrequentWrong(a)) ||
+      getLibraryForgotCount(b) -
+        getLibraryForgotCount(a) ||
+      updatedFallback(a, b)
+    );
+  }
+
+  if (mode === "due-first") {
+    return result.sort((a, b) =>
+      String(a.nextReviewDate || "9999-12-31")
+        .localeCompare(
+          String(b.nextReviewDate || "9999-12-31")
+        ) ||
+      updatedFallback(a, b)
+    );
+  }
+
+  if (mode === "relevance" && query) {
+    return result.sort((a, b) =>
+      getLibrarySearchScore(b, query) -
+        getLibrarySearchScore(a, query) ||
+      updatedFallback(a, b)
+    );
+  }
+
+  return result.sort(updatedFallback);
+}
 function renderNotes() {
   populateDeckSelects();
 
@@ -3731,10 +3940,7 @@ function renderNotes() {
   }
 
   renderDeckWallHeader();
-
-  const notes = getFilteredNotes().sort((a, b) => {
-    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
-  });
+const notes = sortLibraryNotes(getFilteredNotes());
 
   if (!notes.length) {
     els.notesList.innerHTML = `<div class="empty-state">目前沒有符合條件的卡片。</div>`;
