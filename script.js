@@ -13036,3 +13036,345 @@ if ("serviceWorker" in navigator) {
   window.creamyCardLibrarySortV3Repair =
     initCardLibrarySortV3;
 })();
+
+
+/* =========================================================
+   REVIEW CURVE RULES V1
+   - 忘了：減 2 階段
+   - 普通：加 1 階段
+   - 記住了：加 2 階段
+   - 已熟記：加 3 階段
+   - 所有評分都代表今天已複習
+   - 右鍵卡片可直接標記今天已複習
+   ========================================================= */
+
+(function () {
+  "use strict";
+
+  if (window.__creamyReviewCurveRulesV1) return;
+  window.__creamyReviewCurveRulesV1 = true;
+
+  const MAX_REVIEW_STAGE =
+    CURVE_DAYS.length - 1;
+
+  const STAGE_CHANGE = {
+    forgot: -2,
+    okay: 1,
+    remembered: 2,
+    mastered: 3
+  };
+
+  function safeReviewStage(value) {
+    return clamp(
+      Number(value || 0),
+      0,
+      MAX_REVIEW_STAGE
+    );
+  }
+
+  /*
+    第 0 階段本身是「今天」。
+    但既然今天已經複習過，最早安排在明天，
+    避免同一天再次出現在待複習。
+  */
+  function getNextDateForReviewStage(
+    stage,
+    baseDate = todayStr()
+  ) {
+    const safeStage =
+      safeReviewStage(stage);
+
+    const days = Math.max(
+      1,
+      Number(CURVE_DAYS[safeStage] || 0)
+    );
+
+    return addDays(baseDate, days);
+  }
+
+  /*
+    取代原本四個評分按鈕的記憶曲線規則。
+  */
+  window.applyReviewResultToNote =
+    applyReviewResultToNote =
+    function (note, action, options = {}) {
+      if (!note) return;
+
+      const today = todayStr();
+
+      note.reviewHistory ||= [];
+
+      const oldStage =
+        safeReviewStage(note.reviewStage);
+
+      /*
+        手動指定日期保留原有功能。
+      */
+      if (action === "custom") {
+        note.mastered = false;
+        note.lastReviewResult = "custom";
+        note.lastCompletedDate = today;
+        note.nextReviewDate =
+          options.customDate ||
+          note.nextReviewDate;
+
+        note.reviewCount =
+          Number(note.reviewCount || 0) + 1;
+
+        note.updatedAt = today;
+
+        note.reviewHistory.push({
+          date: today,
+          action: "custom",
+          oldStage,
+          reviewStage: oldStage,
+          nextReviewDate:
+            note.nextReviewDate
+        });
+
+        updateStudyProgress();
+        return;
+      }
+
+      const change =
+        STAGE_CHANGE[action];
+
+      if (typeof change !== "number") {
+        console.warn(
+          "Unknown review action:",
+          action
+        );
+
+        return;
+      }
+
+      const newStage = clamp(
+        oldStage + change,
+        0,
+        MAX_REVIEW_STAGE
+      );
+
+      /*
+        新定義：
+        「已熟記」是 +3 階段的評分，
+        不再永久停止這張卡的複習。
+      */
+      note.mastered = false;
+
+      note.lastReviewResult = action;
+      note.lastCompletedDate = today;
+      note.reviewStage = newStage;
+
+      note.nextReviewDate =
+        getNextDateForReviewStage(
+          newStage,
+          today
+        );
+
+      /*
+        忘了會增加錯題及 lapse 次數。
+      */
+      if (action === "forgot") {
+        note.wrongCount =
+          Number(note.wrongCount || 0) + 1;
+
+        note.lapseCount =
+          Number(note.lapseCount || 0) + 1;
+      }
+
+      /*
+        記住了及已熟記算作正確。
+      */
+      if (
+        action === "remembered" ||
+        action === "mastered"
+      ) {
+        note.correctCount =
+          Number(note.correctCount || 0) + 1;
+      }
+
+      /*
+        無論按哪一個，都代表完成一次複習。
+      */
+      note.reviewCount =
+        Number(note.reviewCount || 0) + 1;
+
+      note.updatedAt = today;
+
+      note.reviewHistory.push({
+        date: today,
+        action,
+        oldStage,
+        stageChange: change,
+        reviewStage: newStage,
+        nextReviewDate:
+          note.nextReviewDate
+      });
+
+      updateStudyProgress();
+    };
+
+  /* =======================================================
+     右鍵：直接標記今天已複習
+     ======================================================= */
+
+  function markNoteReviewedToday(noteId) {
+    const note = appState.notes.find(
+      item =>
+        String(item.id) === String(noteId)
+    );
+
+    if (!note) return;
+
+    const today = todayStr();
+
+    /*
+      避免同一天重複按，令完成數重複增加。
+    */
+    if (note.lastCompletedDate === today) {
+      showToast(
+        "今天已經複習",
+        getPlainPreviewFromHtml(
+          note.questionHtml,
+          18
+        ),
+        "info"
+      );
+
+      return;
+    }
+
+    const stage =
+      safeReviewStage(note.reviewStage);
+
+    note.lastCompletedDate = today;
+    note.lastReviewResult =
+      "manual-reviewed";
+
+    /*
+      階段不變，但由今天重新計算同階段的間隔。
+    */
+    note.nextReviewDate =
+      getNextDateForReviewStage(
+        stage,
+        today
+      );
+
+    note.reviewCount =
+      Number(note.reviewCount || 0) + 1;
+
+    note.updatedAt = today;
+    note.reviewHistory ||= [];
+
+    note.reviewHistory.push({
+      date: today,
+      action: "manual-reviewed",
+      oldStage: stage,
+      stageChange: 0,
+      reviewStage: stage,
+      nextReviewDate:
+        note.nextReviewDate
+    });
+
+    updateStudyProgress();
+    requestSave("已標記今天已複習");
+
+    if (typeof playSound === "function") {
+      playSound("remembered");
+    }
+
+    showToast(
+      "已標記今天已複習",
+      `階段維持：${getCurveStageLabel(stage)}`,
+      "success"
+    );
+
+    renderAll();
+  }
+
+  window.markNoteReviewedToday =
+    markNoteReviewedToday;
+
+  /*
+    保留原本完整右鍵選單，
+    只在選單底部加入「標記今天已複習」。
+  */
+  const baseOpenNoteActionMenu =
+    window.openNoteActionMenuFinal ||
+    openNoteActionMenuFinal;
+
+  function enhancedOpenNoteActionMenu(
+    event,
+    noteId
+  ) {
+    baseOpenNoteActionMenu(
+      event,
+      noteId
+    );
+
+    const menu =
+      document.getElementById(
+        "contextMenu"
+      );
+
+    const note = appState.notes.find(
+      item =>
+        String(item.id) === String(noteId)
+    );
+
+    if (!menu || !note) return;
+
+    const separator =
+      document.createElement("div");
+
+    separator.className =
+      "context-menu-sep";
+
+    const button =
+      document.createElement("button");
+
+    button.type = "button";
+
+    const reviewedToday =
+      note.lastCompletedDate === todayStr();
+
+    button.textContent = reviewedToday
+      ? "✓ 今天已複習"
+      : "✓ 標記今天已複習";
+
+    button.disabled = reviewedToday;
+
+    button.addEventListener(
+      "click",
+      event => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (
+          typeof hideContextMenuFinal ===
+          "function"
+        ) {
+          hideContextMenuFinal();
+        }
+
+        markNoteReviewedToday(noteId);
+      }
+    );
+
+    menu.appendChild(separator);
+    menu.appendChild(button);
+  }
+
+  window.openNoteActionMenuFinal =
+    enhancedOpenNoteActionMenu;
+
+  /*
+    同時更新原本桌面右鍵 handler 使用的函式。
+  */
+  try {
+    openNoteActionMenuFinal =
+      enhancedOpenNoteActionMenu;
+  } catch {
+    // 如果瀏覽器不容許重新指定，手機仍會使用 window 版本
+  }
+})();
