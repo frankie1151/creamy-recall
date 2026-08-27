@@ -217,6 +217,7 @@ notesSortInput: document.getElementById("notesSortInput"),
     importanceInput: document.getElementById("importanceInput"),
     difficultyInput: document.getElementById("difficultyInput"),
     starredInput: document.getElementById("starredInput"),
+	  englishModeInput: document.getElementById("englishModeInput"),
     scheduleModeInput: document.getElementById("scheduleModeInput"),
     curveStageInput: document.getElementById("curveStageInput"),
     nextReviewDateInput: document.getElementById("nextReviewDateInput"),
@@ -822,7 +823,8 @@ function normalizeNote(note, decks, deckNameMap) {
     answer: note.answer || stripHtml(answerHtml),
     questionHtml,
     answerHtml,
-    starred: !!note.starred,
+   starred: !!note.starred,
+englishMode: !!note.englishMode,
     importance: note.importance || "medium",
     difficulty: note.difficulty || "medium",
     scheduleMode: note.scheduleMode || "curve",
@@ -1913,6 +1915,7 @@ function openModal(editId = null, options = {}) {
   els.importanceInput.value = "medium";
   els.difficultyInput.value = "medium";
   els.starredInput.checked = false;
+	els.englishModeInput.checked = false;
   els.scheduleModeInput.value = "curve";
   els.curveStageInput.value = "0";
   els.nextReviewDateInput.value = getScheduleDateByStage(0);
@@ -1933,6 +1936,7 @@ function openModal(editId = null, options = {}) {
     els.importanceInput.value = note.importance;
     els.difficultyInput.value = note.difficulty;
     els.starredInput.checked = note.starred;
+	  els.englishModeInput.checked = !!note.englishMode;
     els.scheduleModeInput.value = note.scheduleMode || "curve";
     els.curveStageInput.value = String(note.reviewStage || 0);
     els.nextReviewDateInput.value = note.nextReviewDate || getScheduleDateByStage(0);
@@ -1998,6 +2002,8 @@ async function saveNoteFromModal(event) {
     questionHtml,
     answerHtml,
     starred: els.starredInput.checked,
+	  starred: els.starredInput.checked,
+englishMode: els.englishModeInput.checked,
     importance: els.importanceInput.value,
     difficulty: els.difficultyInput.value,
     scheduleMode,
@@ -3954,12 +3960,23 @@ const notes = sortLibraryNotes(getFilteredNotes());
 
     return `
       <div
-        class="wall-card creamy-card"
+       class="wall-card creamy-card ${note.englishMode ? "english-card-mode" : ""}"
         data-context-note="${escapeAttr(note.id)}"
         data-click-study-note="${escapeAttr(note.id)}"
         title="左鍵立即複習；右鍵開啟操作選單"
       >
         <div class="wall-card-top">
+		${note.englishMode ? `
+  <button
+    class="card-speak-english-btn"
+    type="button"
+    title="朗讀英文問題"
+    aria-label="朗讀英文問題"
+    onclick="event.stopPropagation(); speakEnglishNote('${escapeAttr(note.id)}')"
+  >
+    🔊
+  </button>
+` : ""}
           <div class="wall-card-tags">
             <span class="mini-dot" style="--dot-color:${escapeAttr(deck.color)}"></span>
             <span>${escapeHtml(deck.name)}</span>
@@ -7809,7 +7826,20 @@ if (inStudyMode && !studyInlineEditing) {
     els.studyDeckBadge.textContent = getDeckName(note.deckId);
     els.studyCurveBadge.textContent = getCurveStageLabel(note.reviewStage);
     els.studyStateBadge.textContent = getStudyStateLabel(note);
+els.studyStage.classList.toggle(
+  "english-study-mode",
+  !!note.englishMode
+);
 
+const studySpeakEnglishBtn =
+  document.getElementById("studySpeakEnglishBtn");
+
+if (studySpeakEnglishBtn) {
+  studySpeakEnglishBtn.classList.toggle(
+    "hidden",
+    !note.englishMode
+  );
+}
     const questionHtml = studyInlineEditing
       ? (studyEditDraft.questionHtml || "")
       : (note.questionHtml || "");
@@ -13378,3 +13408,109 @@ if ("serviceWorker" in navigator) {
     // 如果瀏覽器不容許重新指定，手機仍會使用 window 版本
   }
 })();
+/* =========================================================
+   English vocabulary / sentence mode
+   ========================================================= */
+
+function getPreferredEnglishVoice() {
+  if (!("speechSynthesis" in window)) return null;
+
+  const voices = window.speechSynthesis.getVoices();
+
+  return (
+    voices.find(voice =>
+      /^en-US$/i.test(voice.lang) &&
+      /Samantha|Google US English|Microsoft/i.test(voice.name)
+    ) ||
+    voices.find(voice => /^en-US/i.test(voice.lang)) ||
+    voices.find(voice => /^en-GB/i.test(voice.lang)) ||
+    voices.find(voice => /^en/i.test(voice.lang)) ||
+    null
+  );
+}
+
+function speakEnglishText(text) {
+  const cleanText = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleanText) {
+    showToast("沒有可朗讀的文字", "", "warn");
+    return;
+  }
+
+  if (!("speechSynthesis" in window)) {
+    showToast(
+      "此瀏覽器不支援朗讀",
+      "請嘗試使用 Safari、Chrome 或 Edge。",
+      "warn"
+    );
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(cleanText);
+  const voice = getPreferredEnglishVoice();
+
+  utterance.lang = voice?.lang || "en-US";
+  utterance.rate = 0.82;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+
+  if (voice) {
+    utterance.voice = voice;
+  }
+
+  utterance.onerror = event => {
+    if (event.error === "canceled" || event.error === "interrupted") {
+      return;
+    }
+
+    showToast("朗讀失敗", "請再按一次朗讀按鈕。", "warn");
+  };
+
+  window.speechSynthesis.speak(utterance);
+}
+
+function speakEnglishNote(noteId) {
+  const note = appState.notes.find(item => item.id === noteId);
+
+  if (!note) {
+    showToast("找不到卡片", "", "warn");
+    return;
+  }
+
+  const text =
+    stripHtml(note.questionHtml || "") ||
+    note.question ||
+    "";
+
+  speakEnglishText(text);
+}
+
+function speakCurrentStudyEnglish() {
+  const note = getCurrentStudyNote();
+
+  if (!note) {
+    showToast("目前沒有卡片", "", "warn");
+    return;
+  }
+
+  const text =
+    stripHtml(note.questionHtml || "") ||
+    note.question ||
+    "";
+
+  speakEnglishText(text);
+}
+
+/* 某些瀏覽器需要先載入一次語音清單 */
+if ("speechSynthesis" in window) {
+  window.speechSynthesis.getVoices();
+
+  window.speechSynthesis.addEventListener(
+    "voiceschanged",
+    () => window.speechSynthesis.getVoices()
+  );
+}
