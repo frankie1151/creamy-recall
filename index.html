@@ -408,7 +408,14 @@
               <span>標記</span>
             </label>
           </div>
+<div class="field english-mode-field">
+  <label>卡片模式</label>
 
+  <label class="check-pill english-mode-check">
+    <input id="englishModeInput" type="checkbox" />
+    <span>背英語單詞／句子</span>
+  </label>
+</div>
           <div class="field">
             <label>排程方式</label>
             <select id="scheduleModeInput">
@@ -707,6 +714,14 @@
             <span id="studyDeckBadge" class="study-chip">Deck</span>
             <span id="studyCurveBadge" class="study-chip">新卡</span>
             <span id="studyStateBadge" class="study-chip">新卡</span>
+            <button
+  id="studySpeakEnglishBtn"
+  class="study-speak-english-btn hidden"
+  type="button"
+  onclick="speakCurrentStudyEnglish()"
+>
+  🔊 朗讀英文
+</button>
           </div>
 
           <div id="studyCardFlip" class="study-card-flip">
