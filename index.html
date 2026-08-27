@@ -377,80 +377,78 @@
       <form id="noteForm" class="modal-form">
         <input id="noteId" type="hidden" />
 
-        <div class="compact-meta-grid">
-          <div class="field">
-            <label>Deck</label>
-            <select id="deckInput"></select>
-          </div>
+       <div class="compact-meta-grid">
+  <div class="field">
+    <label>Deck</label>
+    <select id="deckInput"></select>
+  </div>
 
-          <div class="field">
-            <label>重要性</label>
-            <select id="importanceInput">
-              <option value="high">高</option>
-              <option value="medium" selected>中</option>
-              <option value="low">低</option>
-            </select>
-          </div>
+  <div class="field">
+    <label>重要性</label>
+    <select id="importanceInput">
+      <option value="high">高</option>
+      <option value="medium" selected>中</option>
+      <option value="low">低</option>
+    </select>
+  </div>
 
-          <div class="field">
-            <label>難度</label>
-            <select id="difficultyInput">
-              <option value="hard">困難</option>
-              <option value="medium" selected>中等</option>
-              <option value="easy">容易</option>
-            </select>
-          </div>
+  <div class="field">
+    <label>難度</label>
+    <select id="difficultyInput">
+      <option value="hard">困難</option>
+      <option value="medium" selected>中等</option>
+      <option value="easy">容易</option>
+    </select>
+  </div>
 
-          <div class="field star-field">
-            <label>標星</label>
-            <label class="check-pill">
-              <input id="starredInput" type="checkbox" />
-              <span>標記</span>
-            </label>
-          </div>
-<div class="field english-mode-field">
-  <label>卡片模式</label>
+  <div class="field">
+    <label>卡片設定</label>
 
-  <label class="check-pill english-mode-check">
-    <input id="englishModeInput" type="checkbox" />
-    <span>背英語單詞／句子</span>
-  </label>
+    <div class="card-options-row">
+      <label class="check-pill">
+        <input id="starredInput" type="checkbox" />
+        <span>標星</span>
+      </label>
+
+      <label class="check-pill">
+        <input id="englishModeInput" type="checkbox" />
+        <span>英語模式</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>排程方式</label>
+    <select id="scheduleModeInput">
+      <option value="curve" selected>記憶曲線</option>
+      <option value="custom">手動日期</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>曲線階段</label>
+    <select id="curveStageInput">
+      <option value="0">新卡／今天</option>
+      <option value="1">第 1 階段（1 天後）</option>
+      <option value="2">第 2 階段（3 天後）</option>
+      <option value="3">第 3 階段（7 天後）</option>
+      <option value="4">第 4 階段（14 天後）</option>
+      <option value="5">第 5 階段（30 天後）</option>
+      <option value="6">第 6 階段（60 天後）</option>
+      <option value="7">第 7 階段（90 天後）</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>下次複習日期</label>
+    <input id="nextReviewDateInput" type="date" />
+  </div>
+
+  <div class="field">
+    <label>提醒時間</label>
+    <input id="reminderTimeInput" type="time" />
+  </div>
 </div>
-          <div class="field">
-            <label>排程方式</label>
-            <select id="scheduleModeInput">
-              <option value="curve" selected>記憶曲線</option>
-              <option value="custom">手動日期</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label>曲線階段</label>
-            <select id="curveStageInput">
-              <option value="0">新卡 / 今天</option>
-              <option value="1">第 1 階段（1 天後）</option>
-              <option value="2">第 2 階段（3 天後）</option>
-              <option value="3">第 3 階段（7 天後）</option>
-              <option value="4">第 4 階段（14 天後）</option>
-              <option value="5">第 5 階段（30 天後）</option>
-              <option value="6">第 6 階段（60 天後）</option>
-              <option value="7">第 7 階段（90 天後）</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label>下次複習日期</label>
-            <input id="nextReviewDateInput" type="date" />
-          </div>
-
-          <div class="field">
-            <label>提醒時間</label>
-            <input id="reminderTimeInput" type="time" />
-          </div>
-        </div>
-
-        <div class="field full">
-          <label>問題</label>
           <div class="editor-toolbar sticky-editor-toolbar">
             <button type="button" class="tool-btn" data-editor="questionEditor" data-cmd="bold"><b>B</b></button>
             <button type="button" class="tool-btn" data-editor="questionEditor" data-cmd="italic"><i>I</i></button>
