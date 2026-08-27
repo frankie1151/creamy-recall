@@ -13514,3 +13514,317 @@ if ("speechSynthesis" in window) {
     () => window.speechSynthesis.getVoices()
   );
 }
+/* =========================================================
+   ENGLISH MODE FINAL FIX
+   修正：
+   1. 最後一個 renderNotes 覆蓋英語卡片
+   2. 手機／iPad 朗讀按鈕被 meta row 隱藏
+   3. Safari 多字詞朗讀不穩定
+   ========================================================= */
+
+(function () {
+  if (window.__creamyEnglishModeFinalFix) return;
+  window.__creamyEnglishModeFinalFix = true;
+
+  /* ---------- 取得 appState 裡的正式卡片 ---------- */
+
+  function findCanonicalEnglishNote(noteLike) {
+    if (!noteLike) return null;
+
+    const id = String(noteLike.id || "");
+
+    return (
+      appState?.notes?.find(note =>
+        String(note.id || "") === id
+      ) ||
+      noteLike
+    );
+  }
+
+  function getCanonicalCurrentStudyNote() {
+    const queuedNote =
+      typeof getCurrentStudyNote === "function"
+        ? getCurrentStudyNote()
+        : null;
+
+    return findCanonicalEnglishNote(queuedNote);
+  }
+
+  /* ---------- 修正卡片庫 ---------- */
+
+  function applyEnglishModeToLibraryCards() {
+    const list = document.getElementById("notesList");
+    if (!list || !appState?.notes) return;
+
+    list
+      .querySelectorAll("[data-context-note]")
+      .forEach(card => {
+        const noteId = String(
+          card.dataset.contextNote || ""
+        );
+
+        const note = appState.notes.find(item =>
+          String(item.id || "") === noteId
+        );
+
+        const enabled = !!note?.englishMode;
+
+        card.classList.toggle(
+          "english-card-mode",
+          enabled
+        );
+
+        let button = card.querySelector(
+          ".card-speak-english-btn"
+        );
+
+        if (!enabled) {
+          button?.remove();
+          return;
+        }
+
+        if (!button) {
+          button = document.createElement("button");
+          button.type = "button";
+          button.className = "card-speak-english-btn";
+          button.textContent = "🔊";
+          button.title = "朗讀英文";
+          button.setAttribute(
+            "aria-label",
+            "朗讀英文"
+          );
+
+          button.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            speakEnglishNote(note.id);
+          });
+
+          card.appendChild(button);
+        }
+      });
+  }
+
+  /*
+    你的 script.js 後面還有另一個 renderNotes，
+    它會覆蓋較早加入的英語版本。
+    所以必須在檔案最底再包一次。
+  */
+  const renderNotesBeforeEnglishFinal = renderNotes;
+
+  window.renderNotes =
+    renderNotes =
+    function (...args) {
+      const result =
+        renderNotesBeforeEnglishFinal.apply(this, args);
+
+      applyEnglishModeToLibraryCards();
+
+      return result;
+    };
+
+  /* ---------- 修正學習模式 ---------- */
+
+  function applyEnglishModeToStudy() {
+    const stage =
+      document.getElementById("studyStage");
+
+    const button =
+      document.getElementById(
+        "studySpeakEnglishBtn"
+      );
+
+    if (!stage) return;
+
+    const note = getCanonicalCurrentStudyNote();
+    const enabled = !!note?.englishMode;
+
+    stage.classList.toggle(
+      "english-study-mode",
+      enabled
+    );
+
+    if (button) {
+      button.classList.toggle(
+        "hidden",
+        !enabled
+      );
+
+      /*
+        手機 CSS 會隱藏 .study-meta-row。
+        將按鈕移到 study-card-stack，
+        避免跟著整行消失。
+      */
+      const stack = stage.querySelector(
+        ".study-card-stack"
+      );
+
+      if (
+        stack &&
+        button.parentElement !== stack
+      ) {
+        const flipCard =
+          document.getElementById(
+            "studyCardFlip"
+          );
+
+        stack.insertBefore(
+          button,
+          flipCard || stack.firstChild
+        );
+      }
+    }
+  }
+
+  /*
+    再包最後生效的 renderStudyMode，
+    包括 iPhone 和 iPad 後續修正版本。
+  */
+  const renderStudyBeforeEnglishFinal =
+    renderStudyMode;
+
+  window.renderStudyMode =
+    renderStudyMode =
+    async function (...args) {
+      const result =
+        await renderStudyBeforeEnglishFinal.apply(
+          this,
+          args
+        );
+
+      applyEnglishModeToStudy();
+
+      return result;
+    };
+
+  /* ---------- Safari／iOS 穩定朗讀 ---------- */
+
+  let englishSpeechTimer = null;
+
+  window.speakEnglishText =
+    speakEnglishText =
+    function (text) {
+      const cleanText = String(text || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (!cleanText) {
+        showToast(
+          "沒有可朗讀的文字",
+          "",
+          "warn"
+        );
+        return;
+      }
+
+      if (
+        !("speechSynthesis" in window) ||
+        !("SpeechSynthesisUtterance" in window)
+      ) {
+        showToast(
+          "此瀏覽器不支援朗讀",
+          "請使用 Safari、Chrome 或 Edge。",
+          "warn"
+        );
+        return;
+      }
+
+      const synth = window.speechSynthesis;
+
+      if (englishSpeechTimer) {
+        clearTimeout(englishSpeechTimer);
+      }
+
+      synth.cancel();
+
+      /*
+        Safari 在 cancel() 後立即 speak()
+        偶爾不會播放，因此稍等 100ms。
+      */
+      englishSpeechTimer = setTimeout(() => {
+        const utterance =
+          new SpeechSynthesisUtterance(
+            cleanText
+          );
+
+        const voice =
+          typeof getPreferredEnglishVoice ===
+          "function"
+            ? getPreferredEnglishVoice()
+            : null;
+
+        utterance.lang =
+          voice?.lang || "en-US";
+
+        utterance.rate = 0.82;
+        utterance.pitch = 1;
+        utterance.volume = 1;
+
+        if (voice) {
+          utterance.voice = voice;
+        }
+
+        /*
+          保留全域引用，避免 Safari 在句子
+          尚未讀完前回收 utterance。
+        */
+        window.__creamyActiveEnglishUtterance =
+          utterance;
+
+        utterance.onend = () => {
+          if (
+            window.__creamyActiveEnglishUtterance ===
+            utterance
+          ) {
+            window.__creamyActiveEnglishUtterance =
+              null;
+          }
+        };
+
+        utterance.onerror = event => {
+          if (
+            event.error === "canceled" ||
+            event.error === "interrupted"
+          ) {
+            return;
+          }
+
+          showToast(
+            "朗讀失敗",
+            "請再按一次朗讀按鈕。",
+            "warn"
+          );
+        };
+
+        synth.resume();
+        synth.speak(utterance);
+
+        /*
+          某些 iPhone/iPad 會自行進入 paused。
+        */
+        setTimeout(() => {
+          if (synth.paused) {
+            synth.resume();
+          }
+        }, 250);
+      }, 100);
+    };
+
+  /* ---------- 首次載入時也套用 ---------- */
+
+  document.addEventListener(
+    "DOMContentLoaded",
+    () => {
+      applyEnglishModeToLibraryCards();
+      applyEnglishModeToStudy();
+    }
+  );
+
+  window.applyEnglishModeToLibraryCards =
+    applyEnglishModeToLibraryCards;
+
+  window.applyEnglishModeToStudy =
+    applyEnglishModeToStudy;
+})();
