@@ -4518,3 +4518,226 @@ body.iphone-mode .lightbox img {
   font-size: 14px;
   font-weight: 700;
 }
+/* =========================================================
+   English mode final UI fix
+   2026-08-27
+   ========================================================= */
+
+/* ---------- 編輯卡片：桌面版加寬 ---------- */
+
+@media (min-width: 1201px) {
+  .note-modal-card {
+    width: min(1240px, calc(100vw - 32px)) !important;
+  }
+
+  .note-modal-card .compact-meta-grid {
+    grid-template-columns:
+      minmax(230px, 1.15fr)
+      minmax(150px, 0.8fr)
+      minmax(175px, 0.9fr)
+      minmax(255px, 1.25fr) !important;
+    gap: 12px !important;
+  }
+}
+
+/* ---------- 標星＋英語模式：共用一個外框 ---------- */
+
+.card-options-row {
+  display: flex !important;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 48px;
+
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card-strong);
+  overflow: hidden;
+}
+
+.card-options-row .check-pill {
+  flex: 1 1 50%;
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 48px !important;
+  margin: 0 !important;
+  padding: 6px 8px !important;
+
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px !important;
+
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  white-space: nowrap;
+}
+
+.card-options-row .check-pill + .check-pill {
+  border-left: 1px solid var(--line) !important;
+}
+
+.card-options-row .check-pill input {
+  flex: 0 0 18px !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  margin: 0 !important;
+}
+
+.card-options-row .check-pill span {
+  min-width: 0;
+  font-size: 13px !important;
+  line-height: 1.2;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 英語卡片：所有裝置強制置中、粗體、全黑 ---------- */
+
+.wall-card.english-card-mode {
+  position: relative !important;
+}
+
+.wall-card.english-card-mode .wall-title {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  width: 100% !important;
+  min-height: 120px;
+  margin: 8px 0 !important;
+
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+  overflow-wrap: anywhere;
+
+  -webkit-box-orient: initial !important;
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+}
+
+/* 覆蓋 iPhone 原本的四行截斷及 display:block */
+body.iphone-mode #notesList .wall-card.english-card-mode .wall-title {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  color: #000000 !important;
+  font-size: clamp(20px, 6vw, 30px) !important;
+  font-weight: 800 !important;
+  line-height: 1.35 !important;
+  text-align: center !important;
+
+  -webkit-box-orient: initial !important;
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+}
+
+/* 卡片庫朗讀按鈕 */
+.wall-card.english-card-mode .card-speak-english-btn {
+  position: absolute !important;
+  right: 10px;
+  bottom: 10px;
+  z-index: 5;
+
+  width: 40px !important;
+  height: 40px !important;
+  padding: 0 !important;
+
+  display: inline-grid !important;
+  place-items: center;
+
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #000000;
+
+  font-size: 19px;
+  line-height: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* ---------- 學習模式：所有裝置強制使用英語樣式 ---------- */
+
+#studyStage.english-study-mode .study-content {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+}
+
+#studyStage.english-study-mode .study-content,
+#studyStage.english-study-mode .study-content * {
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+}
+
+#studyStage.english-study-mode .study-content > p,
+#studyStage.english-study-mode .study-content > div {
+  width: 100%;
+}
+
+/* 覆蓋 iPhone 原本強制靠上、display:block 的規則 */
+body.iphone-mode #studyStage.english-study-mode .study-content {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+}
+
+/* ---------- 朗讀按鈕移出被手機隱藏的 meta row ---------- */
+
+#studyStage .study-card-stack {
+  position: relative;
+}
+
+#studyStage .study-speak-english-btn {
+  position: absolute !important;
+  top: 8px;
+  right: 8px;
+  z-index: 30;
+
+  width: auto !important;
+  min-height: 40px;
+  margin: 0 !important;
+  padding: 8px 14px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #000000;
+
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.14);
+}
+
+#studyStage .study-speak-english-btn.hidden {
+  display: none !important;
+}
+
+@media (max-width: 520px) and (pointer: coarse) {
+  #studyStage .study-speak-english-btn {
+    top: 6px;
+    right: 6px;
+    min-height: 38px;
+    padding: 7px 11px;
+    font-size: 14px;
+  }
+}
