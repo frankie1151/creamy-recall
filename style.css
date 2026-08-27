@@ -4362,3 +4362,124 @@ body.iphone-mode .lightbox img {
     width: 100% !important;
   }
 }
+/* =========================================================
+   背英語單詞／句子模式
+   ========================================================= */
+
+.english-mode-field {
+  min-width: 0;
+}
+
+.english-mode-check {
+  width: 100%;
+  min-height: 46px;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* 卡片庫：文字水平及垂直置中 */
+.wall-card.english-card-mode {
+  position: relative;
+}
+
+.wall-card.english-card-mode .wall-title {
+  flex: 1;
+  width: 100%;
+  min-height: 130px;
+  margin: 12px 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  text-align: center !important;
+  font-weight: 800 !important;
+  color: #000000 !important;
+  overflow-wrap: anywhere;
+}
+
+/* 卡片庫朗讀按鈕 */
+.card-speak-english-btn {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+
+  display: inline-grid;
+  place-items: center;
+
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #000000;
+
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.card-speak-english-btn:hover {
+  transform: scale(1.06);
+  background: #f4f4f4;
+}
+
+.card-speak-english-btn:active {
+  transform: scale(0.96);
+}
+
+/* 學習模式朗讀按鈕 */
+.study-speak-english-btn {
+  min-height: 38px;
+  padding: 7px 14px;
+  margin-left: auto;
+
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #000000;
+
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 學習模式：問題和答案置中、粗體、全黑 */
+.english-study-mode .study-content {
+  min-height: 100%;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  text-align: center !important;
+  font-weight: 800 !important;
+  color: #000000 !important;
+}
+
+.english-study-mode .study-content,
+.english-study-mode .study-content * {
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+}
+
+.english-study-mode .study-content p,
+.english-study-mode .study-content div {
+  width: 100%;
+}
+
+/* 手機 */
+@media (max-width: 760px) {
+  .study-speak-english-btn {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .wall-card.english-card-mode .wall-title {
+    min-height: 110px;
+    font-size: clamp(22px, 7vw, 34px);
+  }
+}
