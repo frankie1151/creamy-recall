@@ -13434,7 +13434,7 @@ if ("serviceWorker" in navigator) {
   }
 })();
 /* =========================================================
-   English mode — direct stable version
+   English Speech Engine V2 — 2026-08-29
    ========================================================= */
 
 function isEnglishModeEnabled(value) {
@@ -13454,317 +13454,770 @@ function isEnglishModeEnabled(value) {
   );
 }
 
-let creamyEnglishSpeechRunId = 0;
-let creamyEnglishSpeechTimer = null;
-let creamyEnglishSpeechWatchdog = null;
-let creamyEnglishWordTimer = null;
+const CreamyEnglishSpeech = (() => {
+  const supported =
+    "speechSynthesis" in window &&
+    "SpeechSynthesisUtterance" in window;
 
-function clearCreamyEnglishSpeechTimers() {
-  if (creamyEnglishSpeechTimer) {
-    clearTimeout(creamyEnglishSpeechTimer);
-    creamyEnglishSpeechTimer = null;
-  }
+  const synth = supported
+    ? window.speechSynthesis
+    : null;
 
-  if (creamyEnglishSpeechWatchdog) {
-    clearTimeout(creamyEnglishSpeechWatchdog);
-    creamyEnglishSpeechWatchdog = null;
-  }
+  let voiceCache = [];
 
-  if (creamyEnglishWordTimer) {
-    clearTimeout(creamyEnglishWordTimer);
-    creamyEnglishWordTimer = null;
-  }
-}
+  let sessionId = 0;
+  let chunks = [];
+  let chunkIndex = 0;
 
-function normalizeEnglishSpeechText(text) {
-  return String(text || "")
-    /* 零寬字元 */
-    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+  let currentUtterance = null;
+  let watchdogTimer = null;
+  let resetTimer = null;
 
-    /* 不換行空格 */
-    .replace(/\u00A0/g, " ")
+  let retryUsed = false;
+  let lastCancelTime = 0;
 
-    /* 統一引號 */
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function createEnglishUtterance(text) {
-  const utterance =
-    new SpeechSynthesisUtterance(text);
-
-  /*
-    不再強制指定特定 voice。
-    只指定英文，交給系統選擇可用語音。
-  */
-  utterance.lang = "en-US";
-  utterance.rate = 0.82;
-  utterance.pitch = 1;
-  utterance.volume = 1;
-
-  return utterance;
-}
-
-function speakEnglishByWords(text, runId) {
-  const synth = window.speechSynthesis;
-  const words = text.match(/\S+/g) || [];
-
-  if (!words.length) {
-    showToast(
-      "沒有可朗讀的文字",
-      "",
-      "warn"
-    );
-    return;
-  }
-
-  let index = 0;
-
-  synth.cancel();
-
-  function speakNextWord() {
-    if (runId !== creamyEnglishSpeechRunId) {
-      return;
-    }
-
-    if (index >= words.length) {
-      window.__creamyActiveEnglishUtterance =
-        null;
-
-      return;
-    }
-
-    const utterance =
-      createEnglishUtterance(words[index]);
-
-    index += 1;
-
-    window.__creamyActiveEnglishUtterance =
-      utterance;
-
-    let advanced = false;
-
-    const advance = () => {
-      if (
-        advanced ||
-        runId !== creamyEnglishSpeechRunId
-      ) {
-        return;
-      }
-
-      advanced = true;
-
-      creamyEnglishWordTimer =
-        setTimeout(speakNextWord, 55);
-    };
-
-    utterance.onend = advance;
-
-    utterance.onerror = event => {
-      if (
-        runId !== creamyEnglishSpeechRunId
-      ) {
-        return;
-      }
-
-      if (
-        event.error === "not-allowed" ||
-        event.error === "audio-busy"
-      ) {
-        showToast(
-          "朗讀失敗",
-          "請確認裝置沒有靜音，再按一次。",
-          "warn"
-        );
-
-        return;
-      }
-
-      advance();
-    };
-
-    synth.speak(utterance);
-
-    setTimeout(() => {
-      if (
-        runId === creamyEnglishSpeechRunId &&
-        synth.paused
-      ) {
-        synth.resume();
-      }
-    }, 120);
-  }
-
-  creamyEnglishWordTimer =
-    setTimeout(speakNextWord, 100);
-
-  showToast(
-    "已切換相容朗讀",
-    "系統將逐字讀完整段英文。",
-    "info"
-  );
-}
-
-function speakEnglishText(text) {
-  const cleanText =
-    normalizeEnglishSpeechText(text);
-
-  if (!cleanText) {
-    showToast(
-      "沒有可朗讀的文字",
-      "",
-      "warn"
-    );
-    return;
-  }
-
-  if (
-    !("speechSynthesis" in window) ||
-    !("SpeechSynthesisUtterance" in window)
+  function notify(
+    title,
+    message = "",
+    type = "info"
   ) {
-    showToast(
-      "此瀏覽器不支援朗讀",
-      "請使用 Safari、Chrome 或 Edge。",
-      "warn"
-    );
-    return;
+    if (typeof showToast === "function") {
+      showToast(title, message, type);
+    } else {
+      console.log(title, message);
+    }
   }
 
-  const synth = window.speechSynthesis;
-  const runId = ++creamyEnglishSpeechRunId;
+  function clearTimers() {
+    if (watchdogTimer) {
+      clearTimeout(watchdogTimer);
+      watchdogTimer = null;
+    }
 
-  clearCreamyEnglishSpeechTimers();
+    if (resetTimer) {
+      clearTimeout(resetTimer);
+      resetTimer = null;
+    }
+  }
 
-  let started = false;
-  let fallbackStarted = false;
+  function refreshVoices() {
+    if (!synth) {
+      voiceCache = [];
+      return voiceCache;
+    }
 
-  function useFallback() {
+    const voices = synth.getVoices();
+
+    if (voices && voices.length) {
+      voiceCache = [...voices];
+    }
+
+    return voiceCache;
+  }
+
+  function chooseEnglishVoice() {
+    const voices = refreshVoices();
+
+    if (!voices.length) {
+      return null;
+    }
+
+    return (
+      voices.find(voice =>
+        voice.localService &&
+        /^en-US$/i.test(voice.lang)
+      ) ||
+
+      voices.find(voice =>
+        voice.localService &&
+        /^en-GB$/i.test(voice.lang)
+      ) ||
+
+      voices.find(voice =>
+        voice.localService &&
+        /^en[-_]/i.test(voice.lang)
+      ) ||
+
+      voices.find(voice =>
+        /^en-US$/i.test(voice.lang)
+      ) ||
+
+      voices.find(voice =>
+        /^en-GB$/i.test(voice.lang)
+      ) ||
+
+      voices.find(voice =>
+        /^en[-_]/i.test(voice.lang)
+      ) ||
+
+      null
+    );
+  }
+
+  function normalizeEnglishText(rawText) {
+    let text = String(rawText ?? "");
+
+    try {
+      text = text.normalize("NFKC");
+    } catch {
+      // 舊瀏覽器不支援 normalize 時繼續
+    }
+
+    text = text
+      /* 零寬字元、方向控制字元 */
+      .replace(
+        /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g,
+        ""
+      )
+
+      /* 控制字元 */
+      .replace(
+        /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+        " "
+      )
+
+      /* 不換行空格、軟連字號 */
+      .replace(/\u00A0/g, " ")
+      .replace(/\u00AD/g, "")
+
+      /* 統一英文標點 */
+      .replace(/[“”„‟]/g, '"')
+      .replace(/[‘’‚‛]/g, "'")
+      .replace(/[–—]/g, "-")
+      .replace(/…/g, "...")
+
+      /* HTML 文字裡的 & */
+      .replace(/&/g, " and ");
+
+    /*
+      英語模式只保留英文、數字與英文標點。
+
+      例如：
+      掃把 broom         → broom
+      吸塵器vacuum cleaner → vacuum cleaner
+    */
+    const englishText = text
+      .replace(
+        /[^A-Za-z0-9À-ÖØ-öø-ÿ\s.,!?;:'"()\-\/]/g,
+        " "
+      )
+      .replace(/\s+([,.!?;:])/g, "$1")
+      .replace(/([,.!?;:])(?=[A-Za-z])/g, "$1 ")
+      .replace(/\s+/g, " ")
+      .trim();
+
     if (
-      fallbackStarted ||
-      runId !== creamyEnglishSpeechRunId
+      !/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(
+        englishText
+      )
+    ) {
+      return "";
+    }
+
+    return englishText;
+  }
+
+  function splitIntoChunks(
+    text,
+    maximumLength = 140
+  ) {
+    const words = text
+      .split(/\s+/)
+      .filter(Boolean);
+
+    if (!words.length) {
+      return [];
+    }
+
+    const result = [];
+    let current = "";
+
+    words.forEach(word => {
+      /*
+        極長單字或網址直接切開，避免引擎卡住。
+      */
+      if (word.length > maximumLength) {
+        if (current) {
+          result.push(current);
+          current = "";
+        }
+
+        for (
+          let index = 0;
+          index < word.length;
+          index += maximumLength
+        ) {
+          result.push(
+            word.slice(
+              index,
+              index + maximumLength
+            )
+          );
+        }
+
+        return;
+      }
+
+      const candidate = current
+        ? `${current} ${word}`
+        : word;
+
+      if (
+        candidate.length > maximumLength
+      ) {
+        if (current) {
+          result.push(current);
+        }
+
+        current = word;
+      } else {
+        current = candidate;
+      }
+    });
+
+    if (current) {
+      result.push(current);
+    }
+
+    return result;
+  }
+
+  function createUtterance(
+    text,
+    useExplicitVoice
+  ) {
+    const utterance =
+      new SpeechSynthesisUtterance(text);
+
+    const voice = useExplicitVoice
+      ? chooseEnglishVoice()
+      : null;
+
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang || "en-US";
+    } else {
+      /*
+        找不到本機英文 voice 時，
+        交給瀏覽器按照 en-US 選擇。
+      */
+      utterance.lang = "en-US";
+    }
+
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    return utterance;
+  }
+
+  function finishSession(id) {
+    if (id !== sessionId) {
+      return;
+    }
+
+    clearTimers();
+
+    currentUtterance = null;
+    window.__creamyActiveEnglishUtterance =
+      null;
+  }
+
+  function reportFailure(errorCode) {
+    const code =
+      String(errorCode || "unknown");
+
+    console.warn(
+      "English speech engine failed:",
+      code,
+      getDiagnostics()
+    );
+
+    notify(
+      "英文朗讀失敗",
+      `語音引擎錯誤：${code}`,
+      "warn"
+    );
+  }
+
+  function resetEngineThen(
+    id,
+    callback
+  ) {
+    if (
+      !synth ||
+      id !== sessionId
     ) {
       return;
     }
 
-    fallbackStarted = true;
+    clearTimers();
 
-    if (creamyEnglishSpeechWatchdog) {
-      clearTimeout(
-        creamyEnglishSpeechWatchdog
+    try {
+      synth.cancel();
+      lastCancelTime = Date.now();
+
+      /*
+        cancel() 不會自動解除 paused 狀態。
+      */
+      if (synth.paused) {
+        synth.resume();
+      }
+    } catch (error) {
+      console.warn(
+        "Speech reset failed:",
+        error
       );
-
-      creamyEnglishSpeechWatchdog = null;
     }
 
-    speakEnglishByWords(
-      cleanText,
-      runId
+    const resetStartedAt = Date.now();
+
+    function waitForStableEngine() {
+      if (id !== sessionId) {
+        return;
+      }
+
+      const elapsed =
+        Date.now() - resetStartedAt;
+
+      /*
+        WebKit 的 cancel 回呼可能延遲。
+
+        即使 speaking 已變成 false，
+        仍至少等待 900ms，再放入新語音。
+      */
+      const minimumWaitFinished =
+        elapsed >= 900;
+
+      const engineLooksIdle =
+        !synth.speaking &&
+        !synth.pending;
+
+      if (
+        minimumWaitFinished &&
+        engineLooksIdle
+      ) {
+        if (synth.paused) {
+          synth.resume();
+        }
+
+        callback();
+        return;
+      }
+
+      /*
+        最多等待 2.4 秒，避免永久卡住。
+      */
+      if (elapsed >= 2400) {
+        if (synth.paused) {
+          synth.resume();
+        }
+
+        callback();
+        return;
+      }
+
+      resetTimer = setTimeout(
+        waitForStableEngine,
+        80
+      );
+    }
+
+    resetTimer = setTimeout(
+      waitForStableEngine,
+      100
     );
   }
 
-  function launchSpeech() {
-    if (runId !== creamyEnglishSpeechRunId) {
+  function retryCurrentChunk(id) {
+    if (
+      id !== sessionId ||
+      retryUsed
+    ) {
+      if (id === sessionId) {
+        reportFailure(
+          "speech-did-not-start"
+        );
+      }
+
       return;
     }
 
-    const utterance =
-      createEnglishUtterance(cleanText);
+    retryUsed = true;
 
+    /*
+      第二次不指定 voice，
+      交由瀏覽器選擇系統英文語音。
+    */
+    resetEngineThen(id, () => {
+      playCurrentChunk(id, false);
+    });
+  }
+
+  function playCurrentChunk(
+    id,
+    useExplicitVoice = true
+  ) {
+    if (
+      !synth ||
+      id !== sessionId
+    ) {
+      return;
+    }
+
+    clearTimers();
+
+    if (chunkIndex >= chunks.length) {
+      finishSession(id);
+      return;
+    }
+
+    const chunk = chunks[chunkIndex];
+
+    const utterance =
+      createUtterance(
+        chunk,
+        useExplicitVoice
+      );
+
+    currentUtterance = utterance;
+
+    /*
+      防止 Safari 在 utterance 尚未結束前
+      回收 JavaScript 物件。
+    */
     window.__creamyActiveEnglishUtterance =
       utterance;
 
+    let started = false;
+    let completed = false;
+
     utterance.onstart = () => {
+      if (id !== sessionId) {
+        return;
+      }
+
       started = true;
 
-      if (creamyEnglishSpeechWatchdog) {
-        clearTimeout(
-          creamyEnglishSpeechWatchdog
-        );
-
-        creamyEnglishSpeechWatchdog = null;
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
       }
     };
 
     utterance.onend = () => {
       if (
-        runId === creamyEnglishSpeechRunId
+        completed ||
+        id !== sessionId
       ) {
-        window.__creamyActiveEnglishUtterance =
-          null;
+        return;
       }
+
+      completed = true;
+
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
+
+      currentUtterance = null;
+      chunkIndex += 1;
+      retryUsed = false;
+
+      /*
+        不呼叫 cancel()。
+        直接播放下一個短句。
+      */
+      playCurrentChunk(id, true);
     };
 
     utterance.onerror = event => {
       if (
-        runId !== creamyEnglishSpeechRunId
+        completed ||
+        id !== sessionId
       ) {
         return;
       }
 
-      if (!started) {
-        useFallback();
+      completed = true;
+
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
+
+      const errorCode =
+        event?.error || "unknown";
+
+      /*
+        resetEngineThen() 主動取消時，
+        舊 utterance 可能回報這兩種錯誤。
+      */
+      if (
+        errorCode === "canceled" ||
+        errorCode === "interrupted"
+      ) {
         return;
       }
 
       if (
-        event.error === "canceled" ||
-        event.error === "interrupted"
+        errorCode === "not-allowed"
       ) {
+        reportFailure(errorCode);
         return;
       }
 
-      console.warn(
-        "English speech error:",
-        event.error
+      retryCurrentChunk(id);
+    };
+
+    try {
+      if (synth.paused) {
+        synth.resume();
+      }
+
+      /*
+        乾淨狀態下直接從 click handler
+        同步呼叫 speak()。
+      */
+      synth.speak(utterance);
+    } catch (error) {
+      console.error(
+        "speechSynthesis.speak failed:",
+        error
       );
 
-      showToast(
-        "朗讀失敗",
-        "請再按一次朗讀按鈕。",
+      retryCurrentChunk(id);
+      return;
+    }
+
+    /*
+      1.8 秒內沒有觸發 onstart，
+      使用安全重置後再試一次。
+    */
+    watchdogTimer = setTimeout(() => {
+      if (
+        id === sessionId &&
+        !started
+      ) {
+        retryCurrentChunk(id);
+      }
+    }, 1800);
+  }
+
+  function speak(rawText) {
+    if (!supported || !synth) {
+      notify(
+        "此瀏覽器不支援朗讀",
+        "請使用 Safari、Chrome 或 Edge。",
         "warn"
       );
-    };
+
+      return false;
+    }
+
+    const text =
+      normalizeEnglishText(rawText);
+
+    if (!text) {
+      notify(
+        "找不到可朗讀的英文",
+        "問題欄位中沒有偵測到英文字母。",
+        "warn"
+      );
+
+      return false;
+    }
+
+    const nextChunks =
+      splitIntoChunks(text);
+
+    if (!nextChunks.length) {
+      notify(
+        "找不到可朗讀的英文",
+        "",
+        "warn"
+      );
+
+      return false;
+    }
+
+    const id = ++sessionId;
+
+    clearTimers();
+
+    chunks = nextChunks;
+    chunkIndex = 0;
+    retryUsed = false;
+    currentUtterance = null;
+
+    const preview =
+      text.length > 65
+        ? `${text.slice(0, 65)}…`
+        : text;
+
+    /*
+      這個提示可確認程式實際送出了什麼文字。
+    */
+    notify(
+      "正在朗讀英文",
+      preview,
+      "info"
+    );
 
     if (synth.paused) {
       synth.resume();
     }
 
-    synth.speak(utterance);
+    /*
+      正常乾淨狀態：
+      不 cancel，立即朗讀。
+    */
+    if (
+      !synth.speaking &&
+      !synth.pending
+    ) {
+      const timeSinceLastCancel =
+        Date.now() - lastCancelTime;
+
+      /*
+        使用者剛停止朗讀又立刻重按時，
+        避開仍未完成的 cancel 回呼。
+      */
+      if (
+        lastCancelTime &&
+        timeSinceLastCancel < 900
+      ) {
+        resetTimer = setTimeout(() => {
+          if (id === sessionId) {
+            playCurrentChunk(id, true);
+          }
+        }, 900 - timeSinceLastCancel);
+
+        return true;
+      }
+
+      playCurrentChunk(id, true);
+      return true;
+    }
 
     /*
-      整段英文 1.3 秒仍未開始，
-      自動改為逐字朗讀。
+      只有真的還有舊語音時才重置，
+      並等待 WebKit 完全穩定。
     */
-    creamyEnglishSpeechWatchdog =
-      setTimeout(() => {
-        if (
-          runId === creamyEnglishSpeechRunId &&
-          !started
-        ) {
-          useFallback();
-        }
-      }, 1300);
+    resetEngineThen(id, () => {
+      playCurrentChunk(id, true);
+    });
+
+    return true;
   }
 
-  /*
-    第一次朗讀不要先 cancel。
-    只有已有朗讀時才 cancel。
-  */
-  if (
-    synth.speaking ||
-    synth.pending ||
-    synth.paused
-  ) {
-    synth.cancel();
+  function stop() {
+    sessionId += 1;
 
-    creamyEnglishSpeechTimer =
-      setTimeout(launchSpeech, 120);
-  } else {
-    launchSpeech();
+    clearTimers();
+
+    chunks = [];
+    chunkIndex = 0;
+    retryUsed = false;
+    currentUtterance = null;
+
+    window.__creamyActiveEnglishUtterance =
+      null;
+
+    if (!synth) {
+      return;
+    }
+
+    try {
+      synth.cancel();
+      lastCancelTime = Date.now();
+    } catch (error) {
+      console.warn(
+        "English speech stop failed:",
+        error
+      );
+    }
   }
+
+  function getDiagnostics() {
+    refreshVoices();
+
+    return {
+      supported,
+      speaking: synth
+        ? synth.speaking
+        : false,
+      pending: synth
+        ? synth.pending
+        : false,
+      paused: synth
+        ? synth.paused
+        : false,
+      voiceCount: voiceCache.length,
+      englishVoices: voiceCache
+        .filter(voice =>
+          /^en[-_]/i.test(voice.lang)
+        )
+        .map(voice => ({
+          name: voice.name,
+          lang: voice.lang,
+          localService:
+            voice.localService,
+          default: voice.default
+        })),
+      currentChunk:
+        chunks[chunkIndex] || "",
+      chunkIndex,
+      chunkCount: chunks.length
+    };
+  }
+
+  if (synth) {
+    refreshVoices();
+
+    if (
+      typeof synth.addEventListener ===
+      "function"
+    ) {
+      synth.addEventListener(
+        "voiceschanged",
+        refreshVoices
+      );
+    } else {
+      synth.onvoiceschanged =
+        refreshVoices;
+    }
+  }
+
+  return {
+    speak,
+    stop,
+    refreshVoices,
+    normalizeEnglishText,
+    getDiagnostics
+  };
+})();
+
+function getEnglishQuestionText(note) {
+  if (!note) {
+    return "";
+  }
+
+  const questionHtml =
+    String(note.questionHtml || "");
+
+  const questionText = questionHtml
+    ? stripHtml(questionHtml)
+    : "";
+
+  return (
+    questionText ||
+    String(note.question || "")
+  );
+}
+
+function speakEnglishText(text) {
+  return CreamyEnglishSpeech.speak(text);
 }
 
 function speakEnglishNote(noteId) {
@@ -13784,15 +14237,15 @@ function speakEnglishNote(noteId) {
   }
 
   const text =
-    stripHtml(note.questionHtml || "") ||
-    String(note.question || "");
+    getEnglishQuestionText(note);
 
-  speakEnglishText(text);
+  CreamyEnglishSpeech.speak(text);
 }
 
 function speakCurrentStudyEnglish() {
   const queuedNote =
-    typeof getCurrentStudyNote === "function"
+    typeof getCurrentStudyNote ===
+    "function"
       ? getCurrentStudyNote()
       : null;
 
@@ -13806,21 +14259,21 @@ function speakCurrentStudyEnglish() {
     return;
   }
 
-  const note =
+  const canonicalNote =
     appState?.notes?.find(item =>
       String(item.id) ===
       String(queuedNote.id)
-    ) ||
-    queuedNote;
+    ) || queuedNote;
 
   const text =
-    stripHtml(note.questionHtml || "") ||
-    String(note.question || "");
+    getEnglishQuestionText(
+      canonicalNote
+    );
 
-  speakEnglishText(text);
+  CreamyEnglishSpeech.speak(text);
 }
 
-/* 明確提供給 HTML onclick 使用 */
+/* 提供 HTML onclick 使用 */
 window.isEnglishModeEnabled =
   isEnglishModeEnabled;
 
@@ -13832,3 +14285,13 @@ window.speakEnglishNote =
 
 window.speakCurrentStudyEnglish =
   speakCurrentStudyEnglish;
+
+/* 除錯工具 */
+window.stopEnglishSpeech = () =>
+  CreamyEnglishSpeech.stop();
+
+window.getEnglishSpeechDiagnostics = () =>
+  CreamyEnglishSpeech.getDiagnostics();
+
+window.testEnglishSpeech = text =>
+  CreamyEnglishSpeech.speak(text);
