@@ -2151,7 +2151,48 @@ function toggleStar(id) {
   requestSave("星號已更新");
   renderAll();
 }
+function toggleEnglishMode(id) {
+  const note =
+    appState.notes.find(item =>
+      String(item.id) === String(id)
+    );
 
+  if (!note) {
+    showToast(
+      "找不到卡片",
+      "",
+      "warn"
+    );
+
+    return;
+  }
+
+  const enabled =
+    !isEnglishModeEnabled(
+      note.englishMode
+    );
+
+  note.englishMode = enabled;
+  note.updatedAt = todayStr();
+
+  requestSave(
+    enabled
+      ? "英語模式已開啟"
+      : "英語模式已關閉"
+  );
+
+  renderAll();
+
+  showToast(
+    enabled
+      ? "英語模式已開啟"
+      : "英語模式已關閉",
+    enabled
+      ? "喇叭會優先朗讀答案區中的英文。"
+      : "卡片上的朗讀按鈕已隱藏。",
+    enabled ? "success" : "info"
+  );
+}
 function updateCurveStage(id, stageValue) {
   const note = appState.notes.find(n => n.id === id);
   if (!note) return;
@@ -4207,10 +4248,24 @@ function openNoteActionMenuFinal(event, noteId) {
       onClick: () => openEditModal(noteId)
     },
     {
-      label: note.starred ? "取消星號" : "標星",
-      onClick: () => toggleStar(noteId)
-    },
-    { type: "separator" },
+   {
+  label: note.starred
+    ? "取消星號"
+    : "標星",
+  onClick: () =>
+    toggleStar(noteId)
+},
+{
+  label: isEnglishModeEnabled(
+    note.englishMode
+  )
+    ? "關閉英語模式"
+    : "開啟英語模式",
+  sound: "preview",
+  onClick: () =>
+    toggleEnglishMode(noteId)
+},
+{ type: "separator" },
     {
       type: "select",
       label: "記憶階段",
@@ -13015,56 +13070,107 @@ if ("serviceWorker" in navigator) {
         return;
       }
 
-      els.notesList.innerHTML = notes.map(note => {
-        const question = getPlainPreviewFromHtml(
-          note.questionHtml,
-          90
-        );
+  const qText =
+    getPlainPreviewFromHtml(
+      note.questionHtml,
+      90
+    );
 
-        const deck = getDeck(note.deckId);
-        const fitClass = getFitClass(
-          stripHtml(note.questionHtml)
-        );
+  const deck =
+    getDeck(note.deckId);
 
-        return `
-          <div
-            class="wall-card creamy-card"
-            data-context-note="${escapeAttr(note.id)}"
-            data-click-study-note="${escapeAttr(note.id)}"
-            title="點擊立即複習；長按開啟操作選單"
+  const fitClass =
+    getFitClass(
+      stripHtml(note.questionHtml)
+    );
+
+  const englishModeEnabled =
+    isEnglishModeEnabled(
+      note.englishMode
+    );
+
+  return `
+    <div
+      class="wall-card creamy-card ${
+        englishModeEnabled
+          ? "english-card-mode"
+          : ""
+      }"
+      data-context-note="${escapeAttr(note.id)}"
+      data-click-study-note="${escapeAttr(note.id)}"
+      title="左鍵立即複習；右鍵開啟操作選單"
+    >
+      <div class="wall-card-top">
+        <div class="wall-card-tags">
+          <span
+            class="mini-dot"
+            style="--dot-color:${escapeAttr(deck.color)}"
+          ></span>
+
+          <span>
+            ${escapeHtml(deck.name)}
+          </span>
+        </div>
+
+        <div class="wall-card-actions">
+          <button
+            class="star-btn ${
+              note.starred
+                ? "active"
+                : ""
+            }"
+            type="button"
+            onclick="
+              event.preventDefault();
+              event.stopPropagation();
+              playSound('preview');
+              toggleStar('${escapeAttr(note.id)}');
+            "
+            title="標星"
+            aria-label="標星"
           >
-            <div class="wall-card-top">
-              <div class="wall-card-tags">
-                <span
-                  class="mini-dot"
-                  style="--dot-color:${escapeAttr(deck.color)}"
-                ></span>
+            ${note.starred ? "★" : "☆"}
+          </button>
 
-                <span>${escapeHtml(deck.name)}</span>
-              </div>
+          ${
+            englishModeEnabled
+              ? `
+                <button
+                  class="card-speak-english-btn"
+                  type="button"
+                  data-note-id="${escapeAttr(note.id)}"
+                  title="朗讀答案區英文"
+                  aria-label="朗讀答案區英文"
+                  onclick="
+                    event.preventDefault();
+                    event.stopPropagation();
+                    speakEnglishNote(
+                      this.dataset.noteId
+                    );
+                  "
+                >
+                  🔊
+                </button>
+              `
+              : ""
+          }
+        </div>
+      </div>
 
-              <button
-                class="star-btn ${note.starred ? "active" : ""}"
-                type="button"
-                onclick="event.stopPropagation(); playSound('preview'); toggleStar('${escapeAttr(note.id)}')"
-                title="標星"
-              >
-                ${note.starred ? "★" : "☆"}
-              </button>
-            </div>
+      <div class="wall-title ${fitClass}">
+        ${escapeHtml(
+          qText || "無文字問題"
+        )}
+      </div>
 
-            <div class="wall-title ${fitClass}">
-              ${escapeHtml(question || "無文字問題")}
-            </div>
-
-            <div class="wall-bottom-subtle">
-              ${escapeHtml(getStudyStateLabel(note))}
-            </div>
-          </div>
-        `;
-      }).join("");
-    };
-
+      <div class="wall-bottom-subtle">
+        ${escapeHtml(
+          getStudyStateLabel(note)
+        )}
+      </div>
+    </div>
+  `;
+}).join("");
   /*
     如果搜尋、Deck 或其他篩選改變，
     舊事件仍會呼叫目前的 renderNotes。
@@ -14021,7 +14127,7 @@ const CreamyEnglishSpeech = (() => {
     if (!text) {
       notify(
         "找不到可朗讀的英文",
-        "問題欄位中沒有偵測到英文字母。",
+        "答案與問題欄位中沒有偵測到英文。",
         "warn"
       );
 
@@ -14197,23 +14303,67 @@ const CreamyEnglishSpeech = (() => {
     getDiagnostics
   };
 })();
-
-function getEnglishQuestionText(note) {
+function getNoteFieldPlainText(
+  note,
+  htmlKey,
+  textKey
+) {
   if (!note) {
     return "";
   }
 
-  const questionHtml =
-    String(note.questionHtml || "");
+  const html =
+    String(note[htmlKey] || "");
 
-  const questionText = questionHtml
-    ? stripHtml(questionHtml)
+  const htmlText = html
+    ? stripHtml(html)
     : "";
 
   return (
-    questionText ||
-    String(note.question || "")
+    htmlText ||
+    String(note[textKey] || "").trim()
   );
+}
+
+function containsEnglishLetters(text) {
+  return /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(
+    String(text || "")
+  );
+}
+
+function getEnglishSpeechText(note) {
+  if (!note) {
+    return "";
+  }
+
+  const answerText =
+    getNoteFieldPlainText(
+      note,
+      "answerHtml",
+      "answer"
+    );
+
+  const questionText =
+    getNoteFieldPlainText(
+      note,
+      "questionHtml",
+      "question"
+    );
+
+  /*
+    1. 答案區有英文：朗讀答案
+    2. 答案沒有、問題有英文：朗讀問題
+    3. 兩邊都沒有英文：回傳空字串
+  */
+  if (containsEnglishLetters(answerText)) {
+    return answerText;
+  }
+
+  if (containsEnglishLetters(questionText)) {
+    return questionText;
+  }
+
+  return "";
 }
 
 function speakEnglishText(text) {
@@ -14237,7 +14387,7 @@ function speakEnglishNote(noteId) {
   }
 
   const text =
-    getEnglishQuestionText(note);
+   getEnglishSpeechText(note);
 
   CreamyEnglishSpeech.speak(text);
 }
@@ -14266,7 +14416,7 @@ function speakCurrentStudyEnglish() {
     ) || queuedNote;
 
   const text =
-    getEnglishQuestionText(
+    getEnglishSpeechText(
       canonicalNote
     );
 
