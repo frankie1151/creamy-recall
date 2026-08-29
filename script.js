@@ -1639,9 +1639,22 @@ function renderNotes() {
     const previewText = getPlainPreviewFromHtml(note.answerHtml, 58);
     const deck = getDeck(note.deckId);
     const fitClass = getFitClass(stripHtml(note.questionHtml));
-
+const englishModeEnabled =
+  isEnglishModeEnabled(note.englishMode);
     return `
-      <div class="wall-card creamy-card">
+    class="wall-card creamy-card ${englishModeEnabled ? "english-card-mode" : ""}"
+	${englishModeEnabled ? `
+  <button
+    class="card-speak-english-btn"
+    type="button"
+    data-note-id="${escapeAttr(note.id)}"
+    title="朗讀英文問題"
+    aria-label="朗讀英文問題"
+    onclick="event.preventDefault(); event.stopPropagation(); speakEnglishNote(this.dataset.noteId)"
+  >
+    🔊
+  </button>
+` : ""}
         <div class="wall-card-top">
           <div class="wall-card-tags">
             <span class="mini-dot" style="--dot-color:${escapeAttr(deck.color)}"></span>
@@ -7826,18 +7839,30 @@ if (inStudyMode && !studyInlineEditing) {
     els.studyDeckBadge.textContent = getDeckName(note.deckId);
     els.studyCurveBadge.textContent = getCurveStageLabel(note.reviewStage);
     els.studyStateBadge.textContent = getStudyStateLabel(note);
+const canonicalStudyNote =
+  appState.notes.find(item =>
+    String(item.id) === String(note.id)
+  ) || note;
+
+const englishModeEnabled =
+  isEnglishModeEnabled(
+    canonicalStudyNote.englishMode
+  );
+
 els.studyStage.classList.toggle(
   "english-study-mode",
-  !!note.englishMode
+  englishModeEnabled
 );
 
 const studySpeakEnglishBtn =
-  document.getElementById("studySpeakEnglishBtn");
+  document.getElementById(
+    "studySpeakEnglishBtn"
+  );
 
 if (studySpeakEnglishBtn) {
   studySpeakEnglishBtn.classList.toggle(
     "hidden",
-    !note.englishMode
+    !englishModeEnabled
   );
 }
     const questionHtml = studyInlineEditing
