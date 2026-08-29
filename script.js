@@ -3522,6 +3522,8 @@ window.openModal = openModal;
 window.openEditModal = openEditModal;
 window.deleteNote = deleteNote;
 window.toggleStar = toggleStar;
+window.toggleEnglishMode =
+  toggleEnglishMode;
 window.updateCurveStage = updateCurveStage;
 window.openDeckWall = openDeckWall;
 window.clearDeckWall = clearDeckWall;
