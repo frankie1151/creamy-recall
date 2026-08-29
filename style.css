@@ -4741,3 +4741,75 @@ body.iphone-mode #studyStage.english-study-mode .study-content {
     font-size: 14px;
   }
 }
+/* =========================================================
+   English direct render mobile reinforcement — 2026-08-29
+   ========================================================= */
+
+.wall-card.english-card-mode .wall-title,
+.wall-card.english-card-mode .wall-title * {
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+}
+
+body.iphone-mode
+#notesList
+.wall-card.english-card-mode
+.wall-title,
+body.ipad-immersive
+#notesList
+.wall-card.english-card-mode
+.wall-title {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+
+  -webkit-box-orient: initial !important;
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+}
+
+#studyStage.english-study-mode
+.study-content {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+}
+
+#studyStage.english-study-mode
+.study-content,
+#studyStage.english-study-mode
+.study-content * {
+  color: #000000 !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+}
+
+#studyStage
+#studySpeakEnglishBtn:not(.hidden) {
+  display: inline-flex !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+body.iphone-mode
+#studySpeakEnglishBtn:not(.hidden),
+body.ipad-immersive
+#studySpeakEnglishBtn:not(.hidden) {
+  display: inline-flex !important;
+}
