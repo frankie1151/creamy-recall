@@ -4231,61 +4231,84 @@ function openDeckActionMenuFinal(event, deckId) {
 }
 
 function openNoteActionMenuFinal(event, noteId) {
-  const note = appState.notes.find(n => n.id === noteId);
+  const note = appState.notes.find(
+    item =>
+      String(item.id) === String(noteId)
+  );
+
   if (!note) return;
 
-  const stageOptions = CURVE_DAYS.map((days, idx) => {
-    const selected = note.reviewStage === idx ? "selected" : "";
-    return `<option value="${idx}" ${selected}>${escapeHtml(getCurveStageLabel(idx))}</option>`;
-  }).join("");
+  const stageOptions = CURVE_DAYS.map(
+    (days, index) => {
+      const selected =
+        Number(note.reviewStage || 0) === index
+          ? "selected"
+          : "";
+
+      return `
+        <option value="${index}" ${selected}>
+          ${escapeHtml(
+            getCurveStageLabel(index)
+          )}
+        </option>
+      `;
+    }
+  ).join("");
 
   showContextMenuFinal(event, [
     {
       label: "開始複習",
       sound: "remembered",
-      onClick: () => openCardDirectStudyFinal(noteId)
+      onClick: () =>
+        openCardDirectStudyFinal(noteId)
     },
     {
       label: "編輯",
-      onClick: () => openEditModal(noteId)
+      onClick: () =>
+        openEditModal(noteId)
     },
     {
-   {
-  label: note.starred
-    ? "取消星號"
-    : "標星",
-  onClick: () =>
-    toggleStar(noteId)
-},
-{
-  label: isEnglishModeEnabled(
-    note.englishMode
-  )
-    ? "關閉英語模式"
-    : "開啟英語模式",
-  sound: "preview",
-  onClick: () =>
-    toggleEnglishMode(noteId)
-},
-{ type: "separator" },
+      label: note.starred
+        ? "取消星號"
+        : "標星",
+      onClick: () =>
+        toggleStar(noteId)
+    },
+    {
+      label: isEnglishModeEnabled(
+        note.englishMode
+      )
+        ? "關閉英語模式"
+        : "開啟英語模式",
+      sound: "preview",
+      onClick: () =>
+        toggleEnglishMode(noteId)
+    },
+    {
+      type: "separator"
+    },
     {
       type: "select",
       label: "記憶階段",
-      value: String(note.reviewStage || 0),
+      value: String(
+        note.reviewStage || 0
+      ),
       options: stageOptions,
-      onChange: value => updateCurveStage(noteId, value)
+      onChange: value =>
+        updateCurveStage(noteId, value)
     },
-    { type: "separator" },
+    {
+      type: "separator"
+    },
     {
       label: "刪除",
       danger: true,
       sound: "forgot",
-      onClick: () => deleteNote(noteId)
+      onClick: () =>
+        deleteNote(noteId)
     }
   ]);
 }
-
-
 /* =========================================================
    Direct study from clicked wall card
    ========================================================= */
@@ -5744,9 +5767,22 @@ window.creamyModalResetScrollFinal = creamyModalResetScrollFinal;
 
       { type: "separator" },
 
+    {
+        label: note.starred
+          ? "取消標星"
+          : "標星",
+        onClick: () =>
+          toggleStar(noteId)
+      },
       {
-        label: note.starred ? "取消標星" : "標星",
-        onClick: () => toggleStar(noteId)
+        label: isEnglishModeEnabled(
+          note.englishMode
+        )
+          ? "關閉英語模式"
+          : "開啟英語模式",
+        sound: "preview",
+        onClick: () =>
+          toggleEnglishMode(noteId)
       },
       {
         label: "重要性",
@@ -13051,128 +13087,143 @@ if ("serviceWorker" in navigator) {
     直接取代最後使用的 renderNotes。
     先排好 notes，才產生卡片 HTML。
   */
-  window.renderNotes =
+window.renderNotes =
     renderNotes =
     function () {
       populateDeckSelects();
 
       if (currentDeckWall) {
-        els.filterDeck.value = currentDeckWall;
+        els.filterDeck.value =
+          currentDeckWall;
       }
 
       renderDeckWallHeader();
       ensureSortSelector();
 
-      const notes = sortCards(getFilteredNotes());
+      const notes =
+        sortCards(
+          getFilteredNotes()
+        );
 
       if (!notes.length) {
-        els.notesList.innerHTML =
-          `<div class="empty-state">目前沒有符合條件的卡片。</div>`;
+        els.notesList.innerHTML = `
+          <div class="empty-state">
+            目前沒有符合條件的卡片。
+          </div>
+        `;
 
         return;
       }
 
-  const qText =
-    getPlainPreviewFromHtml(
-      note.questionHtml,
-      90
-    );
+      els.notesList.innerHTML =
+        notes.map(note => {
+          const qText =
+            getPlainPreviewFromHtml(
+              note.questionHtml,
+              90
+            );
 
-  const deck =
-    getDeck(note.deckId);
+          const deck =
+            getDeck(note.deckId);
 
-  const fitClass =
-    getFitClass(
-      stripHtml(note.questionHtml)
-    );
+          const fitClass =
+            getFitClass(
+              stripHtml(
+                note.questionHtml
+              )
+            );
 
-  const englishModeEnabled =
-    isEnglishModeEnabled(
-      note.englishMode
-    );
+          const englishModeEnabled =
+            isEnglishModeEnabled(
+              note.englishMode
+            );
 
-  return `
-    <div
-      class="wall-card creamy-card ${
-        englishModeEnabled
-          ? "english-card-mode"
-          : ""
-      }"
-      data-context-note="${escapeAttr(note.id)}"
-      data-click-study-note="${escapeAttr(note.id)}"
-      title="左鍵立即複習；右鍵開啟操作選單"
-    >
-      <div class="wall-card-top">
-        <div class="wall-card-tags">
-          <span
-            class="mini-dot"
-            style="--dot-color:${escapeAttr(deck.color)}"
-          ></span>
+          return `
+            <div
+              class="wall-card creamy-card ${
+                englishModeEnabled
+                  ? "english-card-mode"
+                  : ""
+              }"
+              data-context-note="${escapeAttr(note.id)}"
+              data-click-study-note="${escapeAttr(note.id)}"
+              title="左鍵立即複習；右鍵開啟操作選單"
+            >
+              <div class="wall-card-top">
+                <div class="wall-card-tags">
+                  <span
+                    class="mini-dot"
+                    style="--dot-color:${escapeAttr(deck.color)}"
+                  ></span>
 
-          <span>
-            ${escapeHtml(deck.name)}
-          </span>
-        </div>
+                  <span>
+                    ${escapeHtml(deck.name)}
+                  </span>
+                </div>
 
-        <div class="wall-card-actions">
-          <button
-            class="star-btn ${
-              note.starred
-                ? "active"
-                : ""
-            }"
-            type="button"
-            onclick="
-              event.preventDefault();
-              event.stopPropagation();
-              playSound('preview');
-              toggleStar('${escapeAttr(note.id)}');
-            "
-            title="標星"
-            aria-label="標星"
-          >
-            ${note.starred ? "★" : "☆"}
-          </button>
+                <div class="wall-card-actions">
+                  <button
+                    class="star-btn ${
+                      note.starred
+                        ? "active"
+                        : ""
+                    }"
+                    type="button"
+                    title="標星"
+                    aria-label="標星"
+                    onclick="
+                      event.preventDefault();
+                      event.stopPropagation();
+                      playSound('preview');
+                      toggleStar(
+                        '${escapeAttr(note.id)}'
+                      );
+                    "
+                  >
+                    ${note.starred ? "★" : "☆"}
+                  </button>
 
-          ${
-            englishModeEnabled
-              ? `
-                <button
-                  class="card-speak-english-btn"
-                  type="button"
-                  data-note-id="${escapeAttr(note.id)}"
-                  title="朗讀答案區英文"
-                  aria-label="朗讀答案區英文"
-                  onclick="
-                    event.preventDefault();
-                    event.stopPropagation();
-                    speakEnglishNote(
-                      this.dataset.noteId
-                    );
-                  "
-                >
-                  🔊
-                </button>
-              `
-              : ""
-          }
-        </div>
-      </div>
+                  ${
+                    englishModeEnabled
+                      ? `
+                        <button
+                          class="card-speak-english-btn"
+                          type="button"
+                          data-note-id="${escapeAttr(note.id)}"
+                          title="朗讀答案區英文"
+                          aria-label="朗讀答案區英文"
+                          onclick="
+                            event.preventDefault();
+                            event.stopPropagation();
+                            speakEnglishNote(
+                              this.dataset.noteId
+                            );
+                          "
+                        >
+                          🔊
+                        </button>
+                      `
+                      : ""
+                  }
+                </div>
+              </div>
 
-      <div class="wall-title ${fitClass}">
-        ${escapeHtml(
-          qText || "無文字問題"
-        )}
-      </div>
+              <div class="wall-title ${fitClass}">
+                ${escapeHtml(
+                  qText ||
+                  "無文字問題"
+                )}
+              </div>
 
-      <div class="wall-bottom-subtle">
-        ${escapeHtml(
-          getStudyStateLabel(note)
-        )}
-      </div>
-    </div>
-  `;
-}).join("");
+              <div class="wall-bottom-subtle">
+                ${escapeHtml(
+                  getStudyStateLabel(note)
+                )}
+              </div>
+            </div>
+          `;
+        }).join("");
+    };
   /*
     如果搜尋、Deck 或其他篩選改變，
     舊事件仍會呼叫目前的 renderNotes。
