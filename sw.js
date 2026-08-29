@@ -10,7 +10,7 @@
 */
 
 const CACHE_NAME =
-  "creamy-recall-cache-v54-speech-v2";
+  "creamy-recall-cache-v55-speech-v3-answer-menu";
 
 const APP_FILES = [
   "./",
