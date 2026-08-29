@@ -4813,3 +4813,77 @@ body.ipad-immersive
 #studySpeakEnglishBtn:not(.hidden) {
   display: inline-flex !important;
 }
+/* =========================================================
+   English card top-right actions — 2026-08-29
+   ========================================================= */
+
+.wall-card-top {
+  align-items: center;
+}
+
+.wall-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.wall-card-actions .star-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+
+  display: inline-grid;
+  place-items: center;
+
+  border-radius: 999px;
+  line-height: 1;
+}
+
+/*
+  覆蓋舊版的右下角 absolute 定位，
+  把喇叭放回卡片右上角。
+*/
+.wall-card.english-card-mode
+.card-speak-english-btn {
+  position: static !important;
+
+  right: auto !important;
+  bottom: auto !important;
+
+  width: 34px !important;
+  height: 34px !important;
+  padding: 0 !important;
+
+  display: inline-grid !important;
+  place-items: center;
+
+  flex: 0 0 34px;
+
+  font-size: 16px;
+  line-height: 1;
+
+  border-radius: 999px;
+  background: #ffffff;
+  color: #000000;
+
+  border: 1px solid
+    rgba(0, 0, 0, 0.16);
+
+  box-shadow:
+    0 3px 9px
+    rgba(0, 0, 0, 0.09);
+}
+
+.wall-card.english-card-mode
+.card-speak-english-btn:hover {
+  transform: scale(1.06);
+}
+
+.wall-card.english-card-mode
+.card-speak-english-btn:active {
+  transform: scale(0.94);
+}
