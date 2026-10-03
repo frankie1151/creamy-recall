@@ -8534,11 +8534,23 @@ if ("serviceWorker" in navigator) {
       if (!res.ok) throw new Error(`${table} upsert ${res.status}`);
     }
   }
-  async function deleteRows(table, ids) {
-    for (const id of ids) {
-      try { await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${enc(id)}`, { method: "DELETE", headers: H() }); } catch {}
+async function deleteRows(table, ids) {
+  for (const id of ids) {
+    const response = await fetch(
+      `${SB_URL}/rest/v1/${table}?id=eq.${enc(id)}`,
+      {
+        method: "DELETE",
+        headers: H()
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `${table} delete failed: HTTP ${response.status}`
+      );
     }
   }
+}
 
   /* ---------- 推送本機 → 雲端 ---------- */
   async function pushState() {
