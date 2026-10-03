@@ -3419,7 +3419,8 @@ if (els.notesSortInput) {
   els.studyCompleteCloseBtn.addEventListener("click", closeStudyMode);
 
   els.studyCardInner.addEventListener("click", e => {
-    if (studyInlineEditing) return;
+   if (e.target.closest("span[data-cloze-id]")) return;
+	  if (studyInlineEditing) return;
     if (e.target.closest("img, a, button, .inline-image-box")) return;
     toggleStudyReveal();
   });
@@ -8828,7 +8829,7 @@ if ("serviceWorker" in navigator) {
     inner.addEventListener("pointerup", e => {
       if (!active) return;
       active = false;
-
+if (e.target.closest("span[data-cloze-id]")) return;
       if (moved) return;                 // 係捲動,唔翻
       if (Date.now() - st > 600) return; // 長按,唔翻
 
