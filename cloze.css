@@ -1,0 +1,85 @@
+/* Creamy Recall — Cloze v1
+   只處理填空標記，不改整體版面。
+*/
+
+/* 編輯及閱讀時都保留相同的行內佔位 */
+span[data-cloze-id] {
+  box-shadow: inset 0 -2px 0 #e9bd35;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* 編輯器內：文字正常可見 */
+#questionEditor span[data-cloze-id],
+#answerEditor span[data-cloze-id],
+.study-content[contenteditable="true"] span[data-cloze-id] {
+  outline: 1px dashed rgba(190, 145, 20, 0.45);
+  outline-offset: 1px;
+}
+
+/* 學習時的互動區，不變更 display / 寬高 / padding */
+#studyStage .cr-cloze-reading span[data-cloze-id] {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 高 specificity，避免英語模式的強制黑字洩漏答案 */
+#studyModeView #studyStage
+.cr-cloze-reading
+span[data-cloze-id]:not([data-cloze-open]),
+#studyModeView #studyStage
+.cr-cloze-reading
+span[data-cloze-id]:not([data-cloze-open]) * {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  text-shadow: none !important;
+  text-decoration-color: transparent !important;
+}
+
+/* 不指定揭示後的顏色，保留原有粗體／文字顏色 */
+#studyStage .cr-cloze-reading span[data-cloze-id]:focus-visible {
+  outline: 2px solid #bd9224;
+  outline-offset: 3px;
+}
+
+/* 工具列只新增一個短按鈕 */
+.cr-cloze-tool {
+  white-space: nowrap;
+}
+
+/* 長按／右鍵選單是浮層，不推動原本格子 */
+#crClozeMenu {
+  position: fixed;
+  z-index: 100100;
+  box-sizing: border-box;
+  width: 210px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100dvh - 20px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 12px;
+  background: var(--card-strong, #fffaf2);
+  color: var(--text, #332b25);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+#crClozeMenu button {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+#crClozeMenu button:hover,
+#crClozeMenu button:focus-visible {
+  background: rgba(160, 140, 100, 0.14);
+}
