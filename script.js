@@ -8540,15 +8540,47 @@ async function deleteRows(table, ids) {
       `${SB_URL}/rest/v1/${table}?id=eq.${enc(id)}`,
       {
         method: "DELETE",
-        headers: H()
+        headers: {
+          ...H(),
+          Prefer: "return=representation"
+        }
       }
     );
 
+    const text = await response.text();
+
+    let result;
+    try {
+      result = text ? JSON.parse(text) : null;
+    } catch {
+      result = null;
+    }
+
     if (!response.ok) {
+      const detail = {
+        table,
+        id,
+        status: response.status,
+        code: result?.code || "",
+        message: result?.message || response.statusText
+      };
+
+      console.error("[雲端刪除失敗]", detail);
+
       throw new Error(
-        `${table} delete failed: HTTP ${response.status}`
+        `${table} delete failed: HTTP ${response.status}; ` +
+        `${detail.code} ${detail.message}`
       );
     }
+
+    console.info("[雲端刪除回應]", {
+      table,
+      id,
+      status: response.status,
+      returnedRows: Array.isArray(result)
+        ? result.length
+        : "未取得資料列清單"
+    });
   }
 }
 
