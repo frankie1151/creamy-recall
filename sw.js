@@ -8,7 +8,7 @@
 
   卡片資料不會儲存在這裡。
 */
-const CACHE_NAME = "creamy-recall-cache-cloze-v4";
+const CACHE_NAME = "creamy-recall-cache-cloze-v5";
 
 const APP_FILES = [
   "./",
