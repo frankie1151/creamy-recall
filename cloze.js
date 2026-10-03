@@ -344,7 +344,86 @@
       firstById.add(id);
     });
   }
+function updateClozeDock() {
+  const stage = byId("studyStage");
+  if (!stage) return;
 
+  let dock = byId("crClozeDock");
+
+  if (!dock) {
+    dock = document.createElement("div");
+    dock.id = "crClozeDock";
+    dock.setAttribute("role", "group");
+    dock.setAttribute("aria-label", "本卡填空控制");
+
+    dock.innerHTML = `
+      <small data-cr-status></small>
+      <div class="cr-cloze-dock-actions">
+        <button
+          type="button"
+          data-cr-command="show-card"
+          title="顯示本卡問題及答案中的所有填空，不翻面"
+        >顯示全部</button>
+        <button
+          type="button"
+          data-cr-command="hide-card"
+          title="隱藏本卡問題及答案中的所有填空，不翻面"
+        >隱藏全部</button>
+      </div>
+    `;
+
+    stage.appendChild(dock);
+  }
+
+  const groups = new Set();
+
+  studyRoots().forEach(root => {
+    root.querySelectorAll(MARK).forEach(marker => {
+      groups.add(keyFor(root, marker));
+    });
+  });
+
+  const editing = !!studyInlineEditing;
+  const unavailable = !currentNote() || groups.size === 0;
+
+  dock.querySelectorAll("button").forEach(button => {
+    button.disabled = editing || unavailable;
+  });
+
+  const status = editing
+    ? "編輯中：儲存後可測試填空"
+    : unavailable
+      ? "本卡沒有填空"
+      : `本卡填空 ${groups.size} 組`;
+
+  const label = dock.querySelector("[data-cr-status]");
+  if (label.textContent !== status) label.textContent = status;
+}
+
+function setWholeCardCloze(open) {
+  if (!currentNote()) return;
+
+  if (studyInlineEditing) {
+    toast("請先儲存或取消編輯");
+    return;
+  }
+
+  prepareStudy();
+
+  studyRoots().forEach(root => {
+    root.querySelectorAll(MARK).forEach(marker => {
+      const key = keyFor(root, marker);
+
+      if (open) revealed.add(key);
+      else revealed.delete(key);
+    });
+  });
+
+  if (!open) window.stopEnglishSpeech?.();
+
+  studyRoots().forEach(refreshRoot);
+  updateClozeDock();
+}
   function prepareStudy() {
     const note = currentNote();
     if (!note) return;
@@ -363,6 +442,7 @@
     }
 
     studyRoots().forEach(refreshRoot);
+    updateClozeDock();
   }
 
   function studyMarker(target) {
@@ -446,7 +526,13 @@
 
   function command(button) {
     const action = button.dataset.crCommand;
+if (button.disabled) return;
 
+  if (action === "show-card" || action === "hide-card") {
+    closeMenu();
+    setWholeCardCloze(action === "show-card");
+    return;
+  }
     if (action === "mark") {
       const editor = button.dataset.crEditor === "study"
         ? getStudyEditableTargets()[studyEditingTarget]
@@ -745,7 +831,7 @@
     prepareStudy,
     speechText,
     init,
-    version: "1"
+    version: "2"
   };
 
   if (document.readyState === "loading") {
