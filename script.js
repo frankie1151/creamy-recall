@@ -7983,11 +7983,14 @@ if (studySpeakEnglishBtn) {
       ? (studyEditDraft.answerHtml || "")
       : (note.answerHtml || "");
 
-    els.studyQuestion.innerHTML = questionHtml;
+els.studyQuestion.innerHTML = questionHtml;
     els.studyAnswer.innerHTML = answerHtml;
     els.studyQuestionSplit.innerHTML = questionHtml;
     els.studyAnswerSplit.innerHTML = answerHtml;
-els.studyAnswerSplit.innerHTML = answerHtml;
+
+    // 啟用填空互動，並建立「顯示全部／隱藏全部」控制列。
+    window.CreamyCloze?.prepareStudy();
+
     const isFlip = studyState.preferences.viewMode === "flip";
 
     els.studyCardFlip.classList.toggle("hidden", !isFlip);
