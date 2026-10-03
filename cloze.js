@@ -722,7 +722,7 @@ if (button.disabled) return;
       (event.metaKey || event.ctrlKey) &&
       event.shiftKey &&
       !event.altKey &&
-      event.code === "KeyK";
+      event.code === "KeyZ";
 
     if (shortcut) {
       const editor = closest(document.activeElement, EDITOR_SELECTOR);
@@ -802,7 +802,7 @@ if (button.disabled) return;
     button.dataset.crCommand = "mark";
     button.dataset.crEditor = editorId;
     button.textContent = "填空";
-    button.title = "建立／取消填空（⌘ / Ctrl + Shift + K）";
+    button.title = "建立／取消填空（⌘ / Ctrl + Shift + Z）";
     return button;
   }
 
