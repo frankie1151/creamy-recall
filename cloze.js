@@ -372,7 +372,8 @@ function updateClozeDock() {
       </div>
     `;
 
-    stage.appendChild(dock);
+   const nav = byId("studyNextBtn")?.parentElement;
+(nav || stage).appendChild(dock);
   }
 
   const groups = new Set();
@@ -827,12 +828,21 @@ if (button.disabled) return;
     }
   }
 
-  window.CreamyCloze = {
-    prepareStudy,
-    speechText,
-    init,
-    version: "2"
-  };
+window.CreamyCloze = {
+  prepareStudy,
+  speechText,
+  init,
+
+  showAll() {
+    setWholeCardCloze(true);
+  },
+
+  hideAll() {
+    setWholeCardCloze(false);
+  },
+
+  version: "3"
+};
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
