@@ -18,7 +18,7 @@ const APP_FILES = [
   "./script.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
-  "./icons/icon-512.png"
+  "./icons/icon-512.png",
   "./cloze.css?v=1",
   "./cloze.js?v=1",
   "./script.js?v=cloze-1",
