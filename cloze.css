@@ -222,3 +222,7 @@ span[data-cloze-id]:not([data-cloze-open]) * {
     white-space: normal;
   }
 }
+/* 隱藏填空數量文字，不保留其佔位 */
+#crClozeDock [data-cr-status] {
+  display: none !important;
+}
