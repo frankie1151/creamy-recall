@@ -2733,7 +2733,6 @@ async function renderStudyMode() {
   els.studyAnswer.innerHTML = answerHtml;
   els.studyQuestionSplit.innerHTML = questionHtml;
   els.studyAnswerSplit.innerHTML = answerHtml;
-window.CreamyCloze?.prepareStudy();
   const isFlip = studyState.preferences.viewMode === "flip";
 
   els.studyCardFlip.classList.toggle("hidden", !isFlip);
@@ -7987,7 +7986,7 @@ if (studySpeakEnglishBtn) {
     els.studyAnswer.innerHTML = answerHtml;
     els.studyQuestionSplit.innerHTML = questionHtml;
     els.studyAnswerSplit.innerHTML = answerHtml;
-
+els.studyAnswerSplit.innerHTML = answerHtml;
     const isFlip = studyState.preferences.viewMode === "flip";
 
     els.studyCardFlip.classList.toggle("hidden", !isFlip);
