@@ -938,7 +938,10 @@ function cleanAllowedStyle(styleString = "", tag = "") {
 function normalizeTablesInRoot(root) {
   root.querySelectorAll("table").forEach(table => {
     [...table.querySelectorAll("*")].forEach(el => {
-      if (!["TABLE", "THEAD", "TBODY", "TR", "TH", "TD"].includes(el.tagName)) {
+     if (
+  !["TABLE", "THEAD", "TBODY", "TR", "TH", "TD"].includes(el.tagName) &&
+  !el.closest("td, th")
+) {
         unwrapNode(el);
       }
     });
@@ -1009,6 +1012,20 @@ function sanitizeRichHtml(html = "") {
     [...node.attributes].forEach(attr => {
       const name = attr.name.toLowerCase();
 
+/*
+        填空只允許 span + 合法 ID。
+        runtime 的 data-cloze-open / aria / tabindex
+        仍由原本白名單移除，不會保存揭示狀態。
+      */
+      if (name === "data-cloze-id") {
+        const valid =
+          tag === "SPAN" &&
+          /^cloze-[A-Za-z0-9_-]{8,80}$/.test(attr.value);
+
+        if (!valid) node.removeAttribute(attr.name);
+        return;
+      }
+		
       if (name.startsWith("on")) {
         node.removeAttribute(attr.name);
         return;
@@ -2716,7 +2733,7 @@ async function renderStudyMode() {
   els.studyAnswer.innerHTML = answerHtml;
   els.studyQuestionSplit.innerHTML = questionHtml;
   els.studyAnswerSplit.innerHTML = answerHtml;
-
+window.CreamyCloze?.prepareStudy();
   const isFlip = studyState.preferences.viewMode === "flip";
 
   els.studyCardFlip.classList.toggle("hidden", !isFlip);
@@ -14447,44 +14464,49 @@ function speakEnglishNote(noteId) {
 
 function speakCurrentStudyEnglish() {
   const queuedNote =
-    typeof getCurrentStudyNote ===
-    "function"
+    typeof getCurrentStudyNote === "function"
       ? getCurrentStudyNote()
       : null;
 
   if (!queuedNote) {
-    showToast(
-      "目前沒有卡片",
-      "",
-      "warn"
-    );
-
+    showToast("目前沒有卡片", "", "warn");
     return;
   }
 
-  const canonicalNote =
+  const note =
     appState?.notes?.find(item =>
-      String(item.id) ===
-      String(queuedNote.id)
+      String(item.id) === String(queuedNote.id)
     ) || queuedNote;
 
-  const text =
-    getEnglishSpeechText(
-      canonicalNote
+  const hasCloze =
+    /data-cloze-id\s*=/.test(
+      `${note.questionHtml || ""} ${note.answerHtml || ""}`
     );
 
-  CreamyEnglishSpeech.speak(text);
+  /*
+    有填空的卡：只朗讀目前可見內容。
+    沒有填空的卡：維持原本答案優先的行為。
+  */
+  if (hasCloze && window.CreamyCloze) {
+    const text = window.CreamyCloze.speechText();
+
+    if (!text) {
+      showToast(
+        "目前沒有可朗讀的英文",
+        "請先顯示答案或揭示填空。",
+        "info"
+      );
+      return;
+    }
+
+    CreamyEnglishSpeech.speak(text);
+    return;
+  }
+
+  CreamyEnglishSpeech.speak(
+    getEnglishSpeechText(note)
+  );
 }
-
-/* 提供 HTML onclick 使用 */
-window.isEnglishModeEnabled =
-  isEnglishModeEnabled;
-
-window.speakEnglishText =
-  speakEnglishText;
-
-window.speakEnglishNote =
-  speakEnglishNote;
 
 window.speakCurrentStudyEnglish =
   speakCurrentStudyEnglish;
