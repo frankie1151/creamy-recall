@@ -138,3 +138,87 @@ span[data-cloze-id]:not([data-cloze-open]) * {
     bottom: calc(100px + env(safe-area-inset-bottom));
   }
 }
+/* ===== 填空工具列：由右下浮窗改為底部行內控制 ===== */
+
+#crClozeDock {
+  position: static !important;
+  inset: auto !important;
+  z-index: auto !important;
+  transform: none !important;
+
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#crClozeDock small {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted, #666);
+}
+
+#crClozeDock .cr-cloze-dock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#crClozeDock button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 9px 12px;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+/* iPad／窄視窗：允許底部控制換行 */
+#studyBottomLayout .study-nav-row {
+  align-items: center;
+  flex-wrap: wrap !important;
+}
+
+/*
+ * 與現有手機介面的判斷條件一致。
+ * 手機改用「⋯」內的項目，因此不再顯示行內工具列。
+ */
+@media (max-width: 520px) and (pointer: coarse) {
+  #crClozeDock {
+    display: none !important;
+  }
+
+  body.iphone-mode #ipMiniMenu {
+    box-sizing: border-box;
+    max-width: calc(
+      100vw - 24px
+      - env(safe-area-inset-left)
+      - env(safe-area-inset-right)
+    );
+    max-height: calc(
+      100dvh - 32px
+      - env(safe-area-inset-top)
+      - env(safe-area-inset-bottom)
+    );
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  #ipMiniMenu button {
+    min-height: 44px;
+    white-space: normal;
+  }
+}
