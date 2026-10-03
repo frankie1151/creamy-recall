@@ -8,7 +8,7 @@
 
   卡片資料不會儲存在這裡。
 */
-const CACHE_NAME = "creamy-recall-cache-cloze-v2";
+const CACHE_NAME = "creamy-recall-cache-cloze-v3";
 
 const APP_FILES = [
   "./",
@@ -20,7 +20,7 @@ const APP_FILES = [
   "./icons/icon-512.png",
   "./cloze.css?v=2",
 "./cloze.js?v=2",
-"./script.js?v=cloze-2",
+"./script.js?v=cloze-3",
 ];
 
 /* 安裝新版 Service Worker */
