@@ -83,3 +83,58 @@ span[data-cloze-id]:not([data-cloze-open]) * {
 #crClozeMenu button:focus-visible {
   background: rgba(160, 140, 100, 0.14);
 }
+/* 只定位新控制列，不修改現有 grid、欄寬或卡片尺寸 */
+#crClozeDock {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 1000;
+
+  box-sizing: border-box;
+  max-width: calc(100vw - 24px);
+  padding: 8px 10px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 12px;
+  background: var(--card-strong, #fffaf2);
+  color: var(--text, #332b25);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14);
+}
+
+#crClozeDock small {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+#crClozeDock .cr-cloze-dock-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#crClozeDock button {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 9px;
+  background: var(--card, #fff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#crClozeDock button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#crClozeDock button:focus-visible {
+  outline: 2px solid #bd9224;
+  outline-offset: 2px;
+}
+
+/* 小螢幕避開底部一部分操作區；仍須實機確認遮擋情況 */
+@media (max-width: 600px) {
+  #crClozeDock {
+    bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+}
