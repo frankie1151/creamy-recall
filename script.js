@@ -9820,6 +9820,14 @@ if (e.target.closest("span[data-cloze-id]")) return;
         if (r === "more") {
           snd();
           ipMiniMenu(btn, [
+			  {
+  label: "顯示全部填空",
+  onClick: () => window.CreamyCloze?.showAll()
+},
+{
+  label: "隱藏全部填空",
+  onClick: () => window.CreamyCloze?.hideAll()
+},
             { label: "已熟記", onClick: () => act("mastered") },
             { label: "稍後再看", onClick: () => act("later") },
             { label: "翻面", onClick: () => (window.toggleStudyReveal || toggleStudyReveal)() },
